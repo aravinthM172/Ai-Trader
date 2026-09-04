@@ -1,0 +1,726 @@
+﻿"""
+engine_core.py  --  ONE source of truth for realistic XAUUSD trade simulation.
+
+This module is a faithful extraction of the simulation that previously lived
+inside ``backtest/realistic_xauusd.py``.  The standalone engine's behaviour is
+the authoritative specification; nothing here invents a new strategy or changes
+a formula.  ``realistic_xauusd.py`` and ``optimizer_realistic_numba.py`` both
+call into this module so the two can never drift apart again.
+
+--------------------------------------------------------------------------------
+WHAT WAS PORTED (verbatim, from realistic_xauusd.py):
+    * ema()                        SMA-seeded EMA, seed at index (period-1)
+    * rsi()                        SMA-seeded Wilder RSI, out pre-filled 50.0
+    * atr()                        SMA-seeded Wilder ATR.  Seed = mean(TR[1:period+1])
+                                   placed at index ``period``.  TR[0] is NOT used.
+    * _backtest()                  the whole event loop, bar for bar
+    * load_ohlc()  / _load()       CSV load + column normalise + time sort/dedupe
+    * prepare_spread()             per-bar spread: points -> price, floored at
+                                   DEFAULT_SPREAD, NaN/inf/<=floor -> DEFAULT_SPREAD
+    * compute_indicators()         one causal pass over the full series + warmup
+
+--------------------------------------------------------------------------------
+POINT M  --  SAME-BAR RE-ENTRY / STOP-TIMING  (authoritative, from the loop):
+
+  Inspected in realistic_xauusd.py `_backtest`:
+
+  1. NO SAME-BAR RE-ENTRY.
+     On bar ``i`` an open position is managed FIRST.  If it closes on bar ``i``
+     the guard ``if position != 0 or closed_this_bar: continue`` prevents a new
+     entry on that same bar.  The earliest a new position can open after an exit
+     on bar ``i`` is bar ``i+1`` (signal read from bar ``i``, filled at
+     ``open[i+1]``).
+
+  2. ENTRY BAR IS NOT CHECKED FOR STOP/TARGET.
+     A position is opened at the END of the bar-``i`` iteration (filled at
+     ``open[i]``).  The stop/target check runs at the TOP of an iteration, so the
+     first bar on which this position can be stopped or take profit is bar
+     ``i+1``.  Bar ``i``'s own high/low never trigger the stop of a position
+     entered on bar ``i``.
+
+  3. Signal uses ONLY completed bar ``i-1`` (ef/es/et/rv/av at ``i-1``); the
+     fill is at ``open[i]``.  No bar-``i`` OHLC touches the decision or the fill.
+
+  These three behaviours are preserved exactly and MUST NOT be changed without
+  changing realistic_xauusd.py's authoritative loop in lock step.
+
+--------------------------------------------------------------------------------
+NOTE ON CONSTANTS:
+  The cost / risk / contract constants below are baked into the numba-compiled
+  ``run_window_fast`` at compile time.  Mutating ``engine_core.SLIPPAGE`` (etc.)
+  from another module after import will NOT affect the compiled kernel.  Change
+  the value here, in the single source.
+"""
+
+import os
+
+import numpy as np
+import pandas as pd
+
+# ---------------------------------------------------------------------------
+# ENGINE VERSION IDENTIFIER
+# ---------------------------------------------------------------------------
+# Bump this string whenever ANY simulation semantic changes (a formula, the
+# event loop, a cost/risk constant, an indicator seed).  Consumers that persist
+# results (e.g. the optimizer checkpoint fingerprint) key off this value plus a
+# hash of this file's source, so a stale checkpoint can never be silently
+# resumed against a changed engine.
+ENGINE_VERSION = "2026-08-29.2"
+
+try:
+    from numba import njit
+    NUMBA = True
+except Exception:                                   # numba is optional
+    NUMBA = False
+
+    def njit(*args, **kwargs):
+        if args and callable(args[0]):
+            return args[0]
+
+        def _decorator(func):
+            return func
+
+        return _decorator
+
+
+# ===========================================================================
+# ACCOUNT / RISK ENGINE  (exact values from realistic_xauusd.py)
+# ===========================================================================
+INITIAL_BALANCE = 100.0
+RISK_PER_TRADE = 0.01            # 1% of realised balance risked per trade
+EQUITY_STOP_FRACTION = 0.20      # stop trading if equity < 20% of start
+MAX_MARGIN_FRACTION = 0.50       # never tie up more than 50% of balance
+LEVERAGE = 100.0                 # assumed account leverage for the margin cap
+
+
+# ===========================================================================
+# XAUUSD MT5 CONTRACT SPEC
+# ===========================================================================
+CONTRACT_SIZE = 100.0            # ounces per 1.0 lot  -> notional / margin only
+TICK_SIZE = 0.01
+TICK_VALUE = 0.10               # account-currency value of one tick, per 1.0 lot
+
+# MT5 P/L identity: value of a 1.00 price move, per 1.0 lot
+VALUE_PER_POINT = TICK_VALUE / TICK_SIZE          # = 10.0  (NOT CONTRACT_SIZE!)
+
+MIN_LOT = 0.01
+LOT_STEP = 0.01
+MAX_LOT = 100.0
+
+
+# ===========================================================================
+# EXECUTION COSTS
+# ===========================================================================
+DEFAULT_SPREAD = 0.35           # $ ; also the floor for the per-bar spread
+SLIPPAGE = 0.01                 # $ ; extra slippage on every stop fill
+COMMISSION_PER_LOT = 0.0        # $ ; round-turn commission per lot
+MIN_STOP_TICKS = 10             # broker "stops level" in ticks -> min SL distance
+
+# derived
+MIN_STOP_DIST = MIN_STOP_TICKS * TICK_SIZE            # 0.10
+EQUITY_STOP = INITIAL_BALANCE * EQUITY_STOP_FRACTION  # 20.0
+
+
+# ===========================================================================
+# DATA
+# ===========================================================================
+DATA = "data/xauusd_m5_5y.csv"
+
+
+# ===========================================================================
+# INDICATORS  (strictly causal, SMA-seeded)  --  ported verbatim
+# ===========================================================================
+@njit(cache=True)
+def ema(x, period):
+    n = x.shape[0]
+    out = np.full(n, np.nan)
+
+    if n < period:
+        return out
+
+    acc = 0.0
+    for k in range(period):
+        acc += x[k]
+
+    prev = acc / period
+    out[period - 1] = prev
+
+    alpha = 2.0 / (period + 1.0)
+    for i in range(period, n):
+        prev = alpha * x[i] + (1.0 - alpha) * prev
+        out[i] = prev
+
+    return out
+
+
+@njit(cache=True)
+def rsi(x, period):
+    n = x.shape[0]
+    out = np.full(n, 50.0)
+
+    if n < period + 1:
+        return out
+
+    gain = 0.0
+    loss = 0.0
+    for i in range(1, period + 1):
+        d = x[i] - x[i - 1]
+        if d > 0.0:
+            gain += d
+        else:
+            loss -= d
+
+    gain /= period
+    loss /= period
+
+    if loss == 0.0:
+        out[period] = 100.0 if gain > 0.0 else 50.0
+    else:
+        rs = gain / loss
+        out[period] = 100.0 - 100.0 / (1.0 + rs)
+
+    for i in range(period + 1, n):
+        d = x[i] - x[i - 1]
+        g = d if d > 0.0 else 0.0
+        l = -d if d < 0.0 else 0.0
+
+        gain = (gain * (period - 1) + g) / period
+        loss = (loss * (period - 1) + l) / period
+
+        if loss == 0.0:
+            out[i] = 100.0 if gain > 0.0 else 50.0
+        else:
+            rs = gain / loss
+            out[i] = 100.0 - 100.0 / (1.0 + rs)
+
+    return out
+
+
+@njit(cache=True)
+def atr(high, low, close, period):
+    n = close.shape[0]
+    out = np.full(n, np.nan)
+
+    if n < period + 1:
+        return out
+
+    acc = 0.0
+    for i in range(1, period + 1):
+        tr = max(
+            high[i] - low[i],
+            abs(high[i] - close[i - 1]),
+            abs(low[i] - close[i - 1]),
+        )
+        acc += tr
+
+    prev = acc / period
+    out[period] = prev
+
+    for i in range(period + 1, n):
+        tr = max(
+            high[i] - low[i],
+            abs(high[i] - close[i - 1]),
+            abs(low[i] - close[i - 1]),
+        )
+        prev = (prev * (period - 1) + tr) / period
+        out[i] = prev
+
+    return out
+
+
+# ===========================================================================
+# CORE BACKTEST  (single chronological window [i0, i1))  --  ported verbatim
+#
+# The only additions vs realistic_xauusd.py are optional trade-log side-writes,
+# guarded by ``record``; and gross_profit / gross_loss / n_recorded appended to
+# the return tuple.  Neither affects control flow or arithmetic.
+# ===========================================================================
+@njit(cache=True)
+def _backtest(
+    open_, high, low, close,
+    ef, es, et, rv, av, spread,
+    i0, i1, warmup,
+    initial_balance, risk_per_trade,
+    rsi_buy, rsi_sell, sl_mult, tp_mult,
+    value_per_point, contract_size, leverage,
+    min_lot, lot_step, max_lot,
+    slippage, commission_per_lot, min_stop_dist,
+    equity_stop, max_margin_frac,
+    t_entry_i, t_exit_i, t_dir, t_lots, t_entry_px, t_exit_px, t_pnl, record,
+):
+    balance = initial_balance
+    peak_equity = initial_balance
+    max_dd_abs = 0.0
+    max_dd_pct = 0.0
+
+    position = 0          # 1 long, -1 short, 0 flat
+    entry_fill = 0.0
+    entry_idx = 0
+    sl = 0.0
+    tp = 0.0
+    lots = 0.0
+
+    trades = 0
+    wins = 0
+    losses = 0
+    gross_profit = 0.0
+    gross_loss = 0.0
+    commission_paid = 0.0
+    n_rec = 0
+
+    start = i0 if i0 > warmup else warmup
+    if start < 1:
+        start = 1
+
+    for i in range(start, i1):
+
+        hs = spread[i] * 0.5
+        closed_this_bar = False
+
+        # -------------------------------------------------------------------
+        # MANAGE OPEN POSITION  (opened on an EARLIER bar - see POINT M)
+        # -------------------------------------------------------------------
+        if position == 1:
+            exit_fill = 0.0
+            hit = False
+
+            if low[i] - hs <= sl:                       # long stop (bid)
+                gap = open_[i] - hs
+                exit_fill = gap if gap < sl else sl
+                exit_fill -= slippage
+                hit = True
+            elif high[i] - hs >= tp:                    # long target (bid)
+                exit_fill = tp
+                hit = True
+
+            if hit:
+                pnl = (exit_fill - entry_fill) * value_per_point * lots
+                comm = commission_per_lot * lots
+                pnl -= comm
+                commission_paid += comm
+                balance += pnl
+                trades += 1
+                if pnl > 0.0:
+                    wins += 1
+                    gross_profit += pnl
+                else:
+                    losses += 1
+                    gross_loss -= pnl
+                if record and n_rec < t_pnl.shape[0]:
+                    t_entry_i[n_rec] = entry_idx
+                    t_exit_i[n_rec] = i
+                    t_dir[n_rec] = 1
+                    t_lots[n_rec] = lots
+                    t_entry_px[n_rec] = entry_fill
+                    t_exit_px[n_rec] = exit_fill
+                    t_pnl[n_rec] = pnl
+                    n_rec += 1
+                position = 0
+                closed_this_bar = True
+
+        elif position == -1:
+            exit_fill = 0.0
+            hit = False
+
+            if high[i] + hs >= sl:                      # short stop (ask)
+                gap = open_[i] + hs
+                exit_fill = gap if gap > sl else sl
+                exit_fill += slippage
+                hit = True
+            elif low[i] + hs <= tp:                     # short target (ask)
+                exit_fill = tp
+                hit = True
+
+            if hit:
+                pnl = (entry_fill - exit_fill) * value_per_point * lots
+                comm = commission_per_lot * lots
+                pnl -= comm
+                commission_paid += comm
+                balance += pnl
+                trades += 1
+                if pnl > 0.0:
+                    wins += 1
+                    gross_profit += pnl
+                else:
+                    losses += 1
+                    gross_loss -= pnl
+                if record and n_rec < t_pnl.shape[0]:
+                    t_entry_i[n_rec] = entry_idx
+                    t_exit_i[n_rec] = i
+                    t_dir[n_rec] = -1
+                    t_lots[n_rec] = lots
+                    t_entry_px[n_rec] = entry_fill
+                    t_exit_px[n_rec] = exit_fill
+                    t_pnl[n_rec] = pnl
+                    n_rec += 1
+                position = 0
+                closed_this_bar = True
+
+        # -------------------------------------------------------------------
+        # EQUITY / DRAWDOWN  (mark-to-market, includes the open trade)
+        # -------------------------------------------------------------------
+        if position == 1:
+            unreal = ((close[i] - hs) - entry_fill) * value_per_point * lots
+        elif position == -1:
+            unreal = (entry_fill - (close[i] + hs)) * value_per_point * lots
+        else:
+            unreal = 0.0
+
+        equity = balance + unreal
+
+        if equity > peak_equity:
+            peak_equity = equity
+
+        dd_abs = peak_equity - equity
+        if dd_abs > max_dd_abs:
+            max_dd_abs = dd_abs
+        if peak_equity > 0.0:
+            dd_pct = dd_abs / peak_equity
+            if dd_pct > max_dd_pct:
+                max_dd_pct = dd_pct
+
+        # -------------------------------------------------------------------
+        # EQUITY KILL-SWITCH
+        # -------------------------------------------------------------------
+        if equity <= equity_stop:
+            if position != 0:
+                if position == 1:
+                    ex = close[i] - hs - slippage
+                    pnl = (ex - entry_fill) * value_per_point * lots
+                else:
+                    ex = close[i] + hs + slippage
+                    pnl = (entry_fill - ex) * value_per_point * lots
+                comm = commission_per_lot * lots
+                pnl -= comm
+                commission_paid += comm
+                balance += pnl
+                trades += 1
+                if pnl > 0.0:
+                    wins += 1
+                    gross_profit += pnl
+                else:
+                    losses += 1
+                    gross_loss -= pnl
+                if record and n_rec < t_pnl.shape[0]:
+                    t_entry_i[n_rec] = entry_idx
+                    t_exit_i[n_rec] = i
+                    t_dir[n_rec] = position
+                    t_lots[n_rec] = lots
+                    t_entry_px[n_rec] = entry_fill
+                    t_exit_px[n_rec] = ex
+                    t_pnl[n_rec] = pnl
+                    n_rec += 1
+                position = 0
+            break
+
+        # no pyramiding, and no re-entry on the bar we just exited on (POINT M)
+        if position != 0 or closed_this_bar:
+            continue
+
+        # -------------------------------------------------------------------
+        # ENTRY SIGNAL  (bar i-1 information ONLY)
+        # -------------------------------------------------------------------
+        a = av[i - 1]
+        if not (a > 0.0):
+            continue
+        if np.isnan(ef[i - 1]) or np.isnan(es[i - 1]) or np.isnan(et[i - 1]):
+            continue
+
+        buy = (
+            ef[i - 1] > es[i - 1]
+            and es[i - 1] > et[i - 1]
+            and rv[i - 1] >= rsi_buy
+        )
+        sell = (
+            ef[i - 1] < es[i - 1]
+            and es[i - 1] < et[i - 1]
+            and rv[i - 1] <= rsi_sell
+        )
+        if not (buy or sell):
+            continue
+
+        # stop distance: ATR based, never tighter than the broker stops level
+        # or the round-trip cost (spread + 2 * slippage)
+        stop_distance = a * sl_mult
+        floor_dist = min_stop_dist
+        cost_dist = spread[i] + 2.0 * slippage
+        if floor_dist < cost_dist:
+            floor_dist = cost_dist
+        if stop_distance < floor_dist:
+            stop_distance = floor_dist
+
+        tp_distance = a * tp_mult
+        if tp_distance < floor_dist:
+            tp_distance = floor_dist
+
+        # -------------------------------------------------------------------
+        # POSITION SIZING  (conservative, round DOWN, never forced)
+        # -------------------------------------------------------------------
+        risk_dollars = balance * risk_per_trade
+
+        loss_per_lot = (
+            (stop_distance + spread[i] + slippage) * value_per_point
+            + commission_per_lot
+        )
+        if loss_per_lot <= 0.0:
+            continue
+
+        raw_lots = risk_dollars / loss_per_lot
+        lots = np.floor(raw_lots / lot_step + 1e-9) * lot_step
+
+        # margin cap
+        ref_price = open_[i]
+        margin_per_lot = ref_price * contract_size / leverage
+        if margin_per_lot > 0.0:
+            max_by_margin = (balance * max_margin_frac) / margin_per_lot
+            max_by_margin = np.floor(max_by_margin / lot_step + 1e-9) * lot_step
+            if lots > max_by_margin:
+                lots = max_by_margin
+
+        if lots > max_lot:
+            lots = max_lot
+
+        if lots < min_lot:                 # honest size too small -> SKIP
+            lots = 0.0
+            continue
+
+        # -------------------------------------------------------------------
+        # FILL AT THIS BAR'S OPEN, ON THE CORRECT SIDE
+        # -------------------------------------------------------------------
+        if buy:
+            entry_fill = open_[i] + hs      # buy at ask
+            sl = entry_fill - stop_distance
+            tp = entry_fill + tp_distance
+            position = 1
+        else:
+            entry_fill = open_[i] - hs      # sell at bid
+            sl = entry_fill + stop_distance
+            tp = entry_fill - tp_distance
+            position = -1
+        entry_idx = i
+
+    # -----------------------------------------------------------------------
+    # CLOSE ANY POSITION STILL OPEN AT THE END OF THE WINDOW
+    # -----------------------------------------------------------------------
+    if position != 0:
+        j = i1 - 1
+        hs = spread[j] * 0.5
+        if position == 1:
+            ex = close[j] - hs - slippage
+            pnl = (ex - entry_fill) * value_per_point * lots
+        else:
+            ex = close[j] + hs + slippage
+            pnl = (entry_fill - ex) * value_per_point * lots
+        comm = commission_per_lot * lots
+        pnl -= comm
+        commission_paid += comm
+        balance += pnl
+        trades += 1
+        if pnl > 0.0:
+            wins += 1
+            gross_profit += pnl
+        else:
+            losses += 1
+            gross_loss -= pnl
+        if record and n_rec < t_pnl.shape[0]:
+            t_entry_i[n_rec] = entry_idx
+            t_exit_i[n_rec] = j
+            t_dir[n_rec] = position
+            t_lots[n_rec] = lots
+            t_entry_px[n_rec] = entry_fill
+            t_exit_px[n_rec] = ex
+            t_pnl[n_rec] = pnl
+            n_rec += 1
+        position = 0
+
+    win_rate = wins / trades if trades > 0 else 0.0
+
+    if gross_loss > 0.0:
+        profit_factor = gross_profit / gross_loss
+    elif gross_profit > 0.0:
+        profit_factor = np.inf
+    else:
+        profit_factor = 0.0
+
+    return (
+        float(trades),
+        balance,
+        balance - initial_balance,
+        win_rate,
+        profit_factor,
+        max_dd_abs,
+        max_dd_pct,
+        float(wins),
+        float(losses),
+        commission_paid,
+        gross_profit,
+        gross_loss,
+        float(n_rec),
+    )
+
+
+# ===========================================================================
+# NUMBA-CALLABLE WINDOW WRAPPER  (used by the standalone AND the optimizer)
+#
+# The cost/risk/contract constants are supplied from this module's globals so
+# there is exactly one place they are defined.  ``record`` is always False here
+# (fast path, no per-trade log); dummy 1-element arrays satisfy numba typing.
+# ===========================================================================
+_RETURN_FIELDS = (
+    "trades", "final_balance", "net_pl", "win_rate", "profit_factor",
+    "max_dd_abs", "max_dd_pct", "wins", "losses", "commission",
+    "gross_profit", "gross_loss", "n_recorded",
+)
+
+
+@njit(cache=True)
+def run_window_fast(
+    open_, high, low, close,
+    ef, es, et, rv, av, spread,
+    i0, i1, warmup,
+    rsi_buy, rsi_sell, sl_mult, tp_mult,
+    slippage=SLIPPAGE,
+    commission_per_lot=COMMISSION_PER_LOT,
+):
+    di = np.zeros(1, dtype=np.int64)
+    df0 = np.zeros(1, dtype=np.float64)
+    return _backtest(
+        open_, high, low, close,
+        ef, es, et, rv, av, spread,
+        i0, i1, warmup,
+        INITIAL_BALANCE, RISK_PER_TRADE,
+        rsi_buy, rsi_sell, sl_mult, tp_mult,
+        VALUE_PER_POINT, CONTRACT_SIZE, LEVERAGE,
+        MIN_LOT, LOT_STEP, MAX_LOT,
+        slippage, commission_per_lot, MIN_STOP_DIST,
+        EQUITY_STOP, MAX_MARGIN_FRACTION,
+        di, di, di, df0, df0, df0, df0, False,
+    )
+
+
+# ===========================================================================
+# PYTHON HELPERS
+# ===========================================================================
+def load_ohlc(path=DATA):
+    """CSV load + column normalise + time sort/dedupe  (was _load())."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Missing {path} - run: python download_history.py")
+
+    df = pd.read_csv(path)
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    for col in ("open", "high", "low", "close"):
+        if col not in df.columns:
+            raise ValueError(f"CSV is missing required column '{col}'")
+
+    if "time" in df.columns:
+        df["time"] = pd.to_datetime(df["time"], utc=True, errors="coerce")
+        df = df.sort_values("time").drop_duplicates("time")
+
+    return df.reset_index(drop=True)
+
+
+def prepare_spread(df):
+    """
+    Per-bar spread in PRICE units.  MT5 'spread' column is in points.
+    Floor at DEFAULT_SPREAD; NaN / non-finite / <= floor -> DEFAULT_SPREAD.
+    (Ported verbatim from realistic_xauusd.main().)
+    """
+    n = len(df)
+    if "spread" in df.columns:
+        sp = df["spread"].to_numpy(np.float64) * TICK_SIZE
+        sp = np.where(np.isfinite(sp) & (sp > DEFAULT_SPREAD), sp, DEFAULT_SPREAD)
+    else:
+        sp = np.full(n, DEFAULT_SPREAD)
+    return np.ascontiguousarray(sp.astype(np.float64))
+
+
+def warmup_for(fast, slow, trend, rsi_period, atr_period):
+    """The standalone warmup rule: skip the first ``max(period) + 5`` bars.
+
+    Single source so the optimizer cannot drift from ``compute_indicators``.
+    """
+    return int(max(fast, slow, trend, rsi_period, atr_period)) + 5
+
+
+def compute_indicators(o, h, l, c, fast, slow, trend, rsi_period, atr_period):
+    """One causal pass over the FULL series + the standalone warmup value."""
+    ef = ema(c, fast)
+    es = ema(c, slow)
+    et = ema(c, trend)
+    rv = rsi(c, rsi_period)
+    av = atr(h, l, c, atr_period)
+    warmup = warmup_for(fast, slow, trend, rsi_period, atr_period)
+    return ef, es, et, rv, av, warmup
+
+
+def run_window_logged(
+    open_, high, low, close,
+    ef, es, et, rv, av, spread,
+    i0, i1, warmup,
+    rsi_buy, rsi_sell, sl_mult, tp_mult,
+    max_trades=None,
+):
+    """
+    Same simulation as ``run_window_fast`` but also returns the per-trade log.
+    ``record`` only gates side-writes, so the summary tuple is identical to the
+    fast path bar-for-bar.
+    """
+    if max_trades is None:
+        max_trades = max(1, int(i1 - i0))
+
+    t_entry_i = np.zeros(max_trades, dtype=np.int64)
+    t_exit_i = np.zeros(max_trades, dtype=np.int64)
+    t_dir = np.zeros(max_trades, dtype=np.int64)
+    t_lots = np.zeros(max_trades, dtype=np.float64)
+    t_entry_px = np.zeros(max_trades, dtype=np.float64)
+    t_exit_px = np.zeros(max_trades, dtype=np.float64)
+    t_pnl = np.zeros(max_trades, dtype=np.float64)
+
+    res = _backtest(
+        np.ascontiguousarray(open_, dtype=np.float64),
+        np.ascontiguousarray(high, dtype=np.float64),
+        np.ascontiguousarray(low, dtype=np.float64),
+        np.ascontiguousarray(close, dtype=np.float64),
+        np.ascontiguousarray(ef, dtype=np.float64),
+        np.ascontiguousarray(es, dtype=np.float64),
+        np.ascontiguousarray(et, dtype=np.float64),
+        np.ascontiguousarray(rv, dtype=np.float64),
+        np.ascontiguousarray(av, dtype=np.float64),
+        np.ascontiguousarray(spread, dtype=np.float64),
+        int(i0), int(i1), int(warmup),
+        INITIAL_BALANCE, RISK_PER_TRADE,
+        float(rsi_buy), float(rsi_sell), float(sl_mult), float(tp_mult),
+        VALUE_PER_POINT, CONTRACT_SIZE, LEVERAGE,
+        MIN_LOT, LOT_STEP, MAX_LOT,
+        slippage, commission_per_lot, MIN_STOP_DIST,
+        EQUITY_STOP, MAX_MARGIN_FRACTION,
+        t_entry_i, t_exit_i, t_dir, t_lots, t_entry_px, t_exit_px, t_pnl, True,
+    )
+
+    n = int(round(res[12]))
+    trades = {
+        "entry_i": t_entry_i[:n].copy(),
+        "exit_i": t_exit_i[:n].copy(),
+        "dir": t_dir[:n].copy(),
+        "lots": t_lots[:n].copy(),
+        "entry_px": t_entry_px[:n].copy(),
+        "exit_px": t_exit_px[:n].copy(),
+        "pnl": t_pnl[:n].copy(),
+    }
+    return res, trades
+
+
+def summary_dict(res):
+    """Turn a ``_backtest`` / ``run_window_*`` return tuple into a labelled dict."""
+    d = {}
+    for i, k in enumerate(_RETURN_FIELDS):
+        d[k] = res[i]
+    d["trades"] = int(round(d["trades"]))
+    d["wins"] = int(round(d["wins"]))
+    d["losses"] = int(round(d["losses"]))
+    d["n_recorded"] = int(round(d["n_recorded"]))
+    return d
+
+
+

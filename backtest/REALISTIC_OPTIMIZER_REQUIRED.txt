@@ -1,0 +1,52 @@
+
+REALISTIC XAUUSD NUMBA OPTIMIZER
+
+MUST USE:
+- XAUUSD M5
+- Correct MT5 tick value
+- tick_value / tick_size for $/price/lot
+- bid/ask execution
+- spread cost
+- slippage
+- ATR
+- SMA-seeded EMA
+- SMA-seeded RSI
+- no look-ahead
+- signal from completed candle
+- entry on next candle open
+- SL/TP intrabar execution
+- gap-aware stop
+- minimum lot rejection
+- lot-step floor
+- maximum lot
+- margin constraint
+- equity-based drawdown
+- train/validation/final chronological split
+
+NEVER:
+- use close[i] as an entry after deciding on candle i
+- use contract_size as the direct $/price multiplier
+- force 0.01 lot
+- optimize using final test
+- select parameters based on final test
+- claim profitability from training alone
+
+TARGET:
+31,104+ configurations
+Numba compiled
+parallel execution where safe
+checkpointing
+progress every 500 configurations
+training ranking
+validation filtering
+untouched final test
+CSV output
+
+RECOMMENDED FILTER:
+training PF >= 1.05
+validation PF >= 1.05
+validation profit > 0
+final PF >= 1.05
+final profit > 0
+controlled drawdown
+minimum trade count

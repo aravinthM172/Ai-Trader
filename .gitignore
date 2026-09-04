@@ -1,0 +1,23 @@
+# secrets / local
+.env
+*.key
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# logs & runtime state
+logs/
+state/
+
+# generated data & outputs
+data/*.csv
+data/export/
+reports/
+
+# build artifacts
+gold-ai-trader-bundle.tar.gz
+
+# editor backups
+*.bak
+*.walkforward-backup
