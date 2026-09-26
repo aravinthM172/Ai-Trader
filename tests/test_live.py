@@ -57,7 +57,8 @@ class FakeGW:
         return SimpleNamespace(symbol=symbol, digits=2, value_per_price_unit_per_lot=1.0)
 
     def account_info(self):
-        return {"balance": self.broker.balance, "equity": self.broker.balance, "trade_allowed": True}
+        return {"balance": self.broker.balance, "equity": self.broker.balance, "trade_allowed": True,
+                "trade_mode": self.broker.trade_mode}
 
     def terminal_info(self):
         return {"trade_allowed": True}
@@ -85,12 +86,14 @@ def _approved(direction="BUY", bar=None):
         "evaluated_direction": direction, "signal": {"decision": direction}, "atr": 300.0,
         "stop_plan": {"entry": 84029.76, "sl": 83429.76, "tp": 84929.76},
         "sizing": {"volume": 0.01}, "safety": {"allow_live_send": True},
+        "account": {"trade_mode": FakeGW.broker.trade_mode},
     }
 
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    broker = SimpleNamespace(sent=[], positions=[], balance=300.0, drop_sl=False, sltp_fails=False)
+    broker = SimpleNamespace(sent=[], positions=[], balance=300.0, drop_sl=False, sltp_fails=False,
+                             trade_mode=0)
     FakeGW.broker = broker
     kill = tmp_path / "KILL_SWITCH"
     monkeypatch.setattr(live, "MT5Gateway", FakeGW)
@@ -205,8 +208,34 @@ def test_foreign_positions_are_not_touched(env):
 
 
 def test_drawdown_breaker_trips_kill_switch(env):
+    env.monkeypatch.setattr(live, "max_drawdown_frac", lambda: 0.35)   # independent of .env
     live.run_once()                                   # peak = 300
     env.broker.positions.clear()
     env.broker.balance = 190.0                        # < 65% of 300
     st = live.run_once()
     assert env.kill.exists() and st["kill_switch_active"] is True
+
+
+def test_real_account_blocked_by_default(env):
+    env.broker.trade_mode = 2                         # REAL account, LIVE_ACCOUNT_MODE unset -> demo only
+    env.monkeypatch.delenv("LIVE_ACCOUNT_MODE", raising=False)
+    st = live.run_once()
+    assert st["last_entry_check"]["account_mode"] == "real" and st["last_entry_check"]["dry_run"]
+    assert env.broker.sent == []
+
+
+def test_real_account_needs_explicit_opt_in(env):
+    env.broker.trade_mode = 2
+    env.monkeypatch.setenv("LIVE_ACCOUNT_MODE", "real")
+    live.run_once()
+    assert len(_sends(env.broker)) == 1
+
+
+def test_account_switched_to_real_just_before_send_is_blocked(env):
+    env.monkeypatch.delenv("LIVE_ACCOUNT_MODE", raising=False)
+    r = _approved()                                   # pipeline saw demo...
+    env.monkeypatch.setattr(live, "run_pipeline", lambda *a, **k: r)
+    env.broker.trade_mode = 2                         # ...but the terminal is now on a real account
+    r["account"]["trade_mode"] = 0
+    st = live.run_once()
+    assert st["last_entry_check"]["sent"]["ok"] is False and env.broker.sent == []

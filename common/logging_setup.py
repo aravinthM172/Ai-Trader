@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
-_LOG_DIR = _ROOT / "logs"
+_LOG_DIR = Path(os.getenv("GOLD_AI_LOG_DIR") or (_ROOT / "logs"))   # tests redirect this
 _LOG_DIR.mkdir(exist_ok=True)
 
 _SECRET_KEYS = ("password", "api_key", "anthropic", "token", "secret", "login")

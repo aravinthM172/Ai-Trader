@@ -186,6 +186,7 @@ class MT5Gateway:
             "leverage": int(field(a, "leverage", 0)),
             "trade_allowed": bool(field(a, "trade_allowed", False)),
             "profit": float(field(a, "profit", 0.0)),
+            "trade_mode": int(field(a, "trade_mode", -1)),    # 0 demo, 1 contest, 2 real
         }
 
     def terminal_info(self) -> dict:

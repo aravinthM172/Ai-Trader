@@ -78,6 +78,19 @@ def max_drawdown_frac() -> float:
     return _env_f("LIVE_MAX_DRAWDOWN_FRAC", 0.35)
 
 
+_ACCOUNT_MODES = {0: "demo", 1: "contest", 2: "real"}
+
+
+def allowed_account_mode() -> str:
+    """Orders go ONLY to this kind of account.  Default demo; real needs LIVE_ACCOUNT_MODE=real."""
+    return os.getenv("LIVE_ACCOUNT_MODE", "demo").strip().lower()
+
+
+def account_mode_ok(account: dict) -> tuple[bool, str]:
+    mode = _ACCOUNT_MODES.get(int(account.get("trade_mode", -1)), "unknown")
+    return mode == allowed_account_mode(), mode
+
+
 # -- persistence -----------------------------------------------------------
 def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(_DB)
@@ -205,7 +218,10 @@ def manage(c, ls: dict) -> dict:
         term = gw.terminal_info()
         _sync_closed(gw, c)
         bal = float(acct.get("balance", 0.0))
-        ls["peak_balance"] = max(float(ls.get("peak_balance") or 0.0), bal)
+        peaks = ls.setdefault("peak_balance_by_login", {})       # demo and real tracked apart
+        key = str(acct.get("login"))
+        peaks[key] = max(float(peaks.get(key) or 0.0), bal)
+        ls["peak_balance"] = peaks[key]
         floor = (1.0 - max_drawdown_frac()) * ls["peak_balance"]
         if bal > 0 and bal < floor and not safety.kill_switch_active():
             _trip_kill(f"drawdown breaker: balance ${bal:.2f} < ${floor:.2f} "
@@ -269,13 +285,18 @@ def maybe_enter(c, ls: dict) -> dict:
 
     live = safety.live_trading_enabled() and not safety.kill_switch_active()
     allow_send = bool(res.get("safety", {}).get("allow_live_send"))
-    if not (live and allow_send):
+    mode_ok, mode = account_mode_ok(res.get("account") or {})
+    out["account_mode"] = mode
+    if not (live and allow_send and mode_ok):
         evaluated[due] = "dry_run_approved"
         out["dry_run"] = True
         _event(c, "would_send", {"signal_bar": sb, "direction": res.get("evaluated_direction"),
                                  "plan": res.get("stop_plan"), "volume": res["sizing"]["volume"],
                                  "live_trading": safety.live_trading_enabled(),
-                                 "allow_live_send": allow_send})
+                                 "allow_live_send": allow_send, "account_mode": mode,
+                                 "allowed_account_mode": allowed_account_mode()})
+        if live and allow_send and not mode_ok:
+            log.warning("NOT SENT: account is %s but LIVE_ACCOUNT_MODE=%s", mode, allowed_account_mode())
         log.info("DRY RUN -- would %s %.2f @ ~%.2f SL %.2f TP %.2f (signal bar %s)",
                  res.get("evaluated_direction"), res["sizing"]["volume"], res["stop_plan"]["entry"],
                  res["stop_plan"]["sl"], res["stop_plan"]["tp"], sb)
@@ -302,6 +323,9 @@ def _send(c, res: dict) -> dict:
         spec = gw.get_spec(cfg.symbol)
         if _my_positions(gw, cfg.symbol):
             return {"ok": False, "error": "position already open"}
+        mode_ok, mode = account_mode_ok(gw.account_info())      # re-check right before sending
+        if not mode_ok:
+            return {"ok": False, "error": f"account is {mode}, LIVE_ACCOUNT_MODE={allowed_account_mode()}"}
         rc, r = -1, None
         for attempt in range(3):
             tick = gw.get_tick(cfg.symbol)
@@ -376,6 +400,7 @@ def run_once() -> dict:
         status = {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "LIVE" if safety.live_trading_enabled() else "DRY_RUN",
+            "allowed_account_mode": allowed_account_mode(),
             "kill_switch_active": safety.kill_switch_active(),
             "strategy": "momentum_rsi_mtf", "timeframe": TF, "magic": MAGIC,
             "account": snap, "last_entry_check": entry, **_summary(c),

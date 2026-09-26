@@ -5,6 +5,9 @@ from pathlib import Path
 # Tests must NEVER trade, even when .env has LIVE_TRADING=true for production.
 # load_dotenv() does not override variables that are already set.
 os.environ["LIVE_TRADING"] = "false"
+# ...and must never write into the production logs (fake trades would look real there).
+import tempfile  # noqa: E402
+os.environ["GOLD_AI_LOG_DIR"] = tempfile.mkdtemp(prefix="gold_ai_test_logs_")
 
 import numpy as np
 import pandas as pd
