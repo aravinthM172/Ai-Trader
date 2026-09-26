@@ -105,22 +105,24 @@ class MT5Gateway:
     # -- server timezone -------------------------------------------
     def _detect_server_offset(self) -> None:
         """MT5 returns timestamps in the BROKER SERVER timezone (e.g. GMT+3).
-        Estimate the offset from the most recent M5 bar vs true UTC now."""
+        Estimate the offset from the most recent M5 bar vs true UTC now.
+
+        Uses the FRESHEST bar across visible symbols (plus BTCUSD.vx, which trades
+        24/7): on weekends the first visible symbol is usually a closed FX pair whose
+        last bar is days old, which used to leave the offset at 0."""
         if not MT5_AVAILABLE:
             return
         try:
             tf = self.timeframes.get("M5")
             best = None
-            for sym in (None,):  # try the first visible symbol
-                pass
+            _mt5.symbol_select("BTCUSD.vx", True)
             syms = _mt5.symbols_get() or []
             for s in syms[:50]:
                 if not getattr(s, "visible", False):
                     continue
                 r = _mt5.copy_rates_from_pos(s.name, tf, 0, 1)
                 if r is not None and len(r):
-                    best = int(r[-1][0])
-                    break
+                    best = max(best or 0, int(r[-1][0]))
             if best is None:
                 return
             now = datetime.now(timezone.utc).timestamp()

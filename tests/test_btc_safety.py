@@ -58,6 +58,7 @@ def test_live_trading_master_switch_default_off(btc_cfg, acc, monkeypatch):
 
 
 def test_daily_loss_limit_blocks(btc_cfg, acc):
+    btc_cfg.max_daily_loss_frac = 0.05           # pin: production .env may set a wider brake
     st = {"days": {}}
     day = state_store.day_bucket(st)
     day["start_balance"] = 100.0
@@ -158,11 +159,13 @@ def test_emergency_shutdown_via_kill_switch_stops_live_send(btc_cfg, acc, monkey
 
 def test_no_order_send_call_anywhere():
     """No actual order_send( invocation in project code (docstrings/comments/field
-    lists are fine -- we look for a real call)."""
+    lists are fine -- we look for a real call) -- except execution/live.py, the one
+    gated live-execution module (its gates are covered by tests/test_live.py)."""
     import re
     call = re.compile(r"(?<![#\"'])\b(mt5|_mt5|self\.raw\(\))\.order_send\s*\(|(?<!\.)\border_send\s*\(")
+    live_module = ROOT / "execution" / "live.py"
     for p in ROOT.rglob("*.py"):
-        if "venv" in p.parts or p.name.startswith("btc_paper_setup"):
+        if "venv" in p.parts or p.name.startswith("btc_paper_setup") or p == live_module:
             continue
         for i, line in enumerate(p.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
             s = line.split("#", 1)[0]

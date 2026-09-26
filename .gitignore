@@ -21,3 +21,6 @@ gold-ai-trader-bundle.tar.gz
 # editor backups
 *.bak
 *.walkforward-backup
+
+# third-party raw data (CC BY-SA, kept local)
+data/raw/

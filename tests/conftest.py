@@ -1,5 +1,10 @@
+import os
 import sys
 from pathlib import Path
+
+# Tests must NEVER trade, even when .env has LIVE_TRADING=true for production.
+# load_dotenv() does not override variables that are already set.
+os.environ["LIVE_TRADING"] = "false"
 
 import numpy as np
 import pandas as pd
