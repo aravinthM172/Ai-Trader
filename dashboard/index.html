@@ -76,6 +76,11 @@ button.theme { margin-left: auto; }
 
   <section class="grid g4" id="tiles" aria-label="Account and challenge"></section>
 
+  <section class="card" style="margin-top:12px" aria-label="Rules">
+    <h2>Rules <span class="small muted" id="rulesSummary" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+    <div class="grid g2" id="rules"></div>
+  </section>
+
   <section class="grid g2" style="margin-top:12px">
     <div class="card">
       <h2>Price · H1</h2>
@@ -195,6 +200,26 @@ function renderTiles() {
   }
 }
 
+function renderRules() {
+  const rules = S.rules || [], R = $("rules"); R.innerHTML = "";
+  const n = (st) => rules.filter((r) => r.status === st).length;
+  $("rulesSummary").textContent = `${n("pass")} passing · ${n("warn")} warnings · ${n("fail")} failing`;
+  const level = { pass: ["good", "pass"], warn: ["warning", "warning"], fail: ["critical", "FAIL"], info: [null, "info"] };
+  for (const group of ["FundingPips", "Own"]) {
+    const rows = rules.filter((r) => r.group === group);
+    const t = el("table"), h = el("tr");
+    ["Status", group === "Own" ? "Your rules" : "FundingPips 2-Step Standard", "Now", "Limit"].forEach((x) => h.append(el("th", {}, x)));
+    t.append(h);
+    for (const r of rows) {
+      const [lv, word] = level[r.status] || level.info;
+      t.append(el("tr", {}, el("td", {}, lv ? chip(lv, word) : el("span", {class: "chip"}, "i info")),
+        el("td", {style: "white-space:normal"}, r.rule), el("td", {style: "white-space:normal"}, r.value ?? "–"),
+        el("td", {class: "muted", style: "white-space:normal"}, r.limit ?? "")));
+    }
+    R.append(el("div", {class: "scroll"}, t));
+  }
+}
+
 function renderTabs() {
   const syms = Object.keys((S.market || {}).symbols || {});
   if (!sym || !syms.includes(sym)) sym = syms[0];
@@ -285,7 +310,7 @@ function renderEquity() {
 function render() {
   if (!S) return;
   if (S.error) { $("updated").textContent = S.error; return; }
-  renderHeader(); renderTiles(); renderTabs(); renderChart(); renderNext(); renderEquity(); renderTables();
+  renderHeader(); renderTiles(); renderRules(); renderTabs(); renderChart(); renderNext(); renderEquity(); renderTables();
 }
 async function load() {
   try { const r = await fetch("/api/state", {cache: "no-store"}); S = await r.json(); render(); }

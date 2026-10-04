@@ -143,6 +143,93 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
     return out
 
 
+# -- rules panel (pure, tested) --------------------------------------------------------
+ALLOWED_SYMBOLS = {"BTCUSD.vx", "XAUUSD.vx", "XAUEUR.vx", "DAX40.vx"}
+
+
+def _r(group, rule, status, value, limit=""):
+    return {"group": group, "rule": rule, "status": status, "value": value, "limit": limit}
+
+
+def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | None, trades: list[dict],
+                processes: dict, kill_switch: str | None, edge: dict | None, news_events: list[dict],
+                now: datetime) -> list[dict]:
+    """Every FundingPips and own rule with status pass / warn / fail / info."""
+    out: list[dict] = []
+    eq = float(account.get("equity") or 0.0)
+    ch = challenge or {}
+    # ---- FundingPips 2-Step Standard (judged as the firm would) --------------------------
+    if ch:
+        res = ch.get("result")
+        out.append(_r("FundingPips", f"Challenge result (phase {ch.get('phase')})",
+                      "fail" if res == "failed" else "pass" if res == "passed" else "info", res))
+        tgt, base = ch.get("target_usd"), ch.get("phase_start_balance")
+        out.append(_r("FundingPips", f"Profit target phase {ch.get('phase')}",
+                      "pass" if tgt and eq >= tgt else "info", f"{ch.get('profit_pct')}%",
+                      f"{'+8' if ch.get('phase') == 1 else '+5'}% (${tgt:,.0f})" if tgt else ""))
+        days = len(ch.get("trading_days") or [])
+        out.append(_r("FundingPips", "Minimum trading days", "pass" if days >= 3 else "info", days, "≥ 3"))
+        dl = float(ch.get("daily_loss_pct") or 0)
+        out.append(_r("FundingPips", "Daily loss", "fail" if dl >= 5 else "warn" if dl >= 3.5 else "pass",
+                      f"{dl:.2f}% (room ${ch.get('daily_headroom_usd')})", "< 5% of day start"))
+        tl = 100 * (base - eq) / base if base and eq else 0.0
+        out.append(_r("FundingPips", "Max loss (static from start)", "fail" if tl >= 10 else "warn" if tl >= 7 else "pass",
+                      f"{max(tl, 0):.2f}% (room ${ch.get('total_headroom_usd')})", f"< 10% (never below ${base * 0.9:,.0f})" if base else "< 10%"))
+    else:
+        out.append(_r("FundingPips", "Challenge tracking", "warn", "not started",
+                      "set PROP_CHALLENGE and run tools.challenge_tracker --reset"))
+    open_tr = [t for t in trades if t.get("status") == "OPEN"]
+    worst = max(((t.get("risk_usd") or 0) / eq * 100 for t in open_tr), default=0.0) if eq else 0.0
+    out.append(_r("FundingPips", "Risk per trade (funded max 3%)", "fail" if worst > 3 else "pass", f"{worst:.2f}% largest open", "≤ 3%"))
+    near_news = []
+    for t in trades:
+        for key in ("opened_utc", "closed_utc"):
+            if not t.get(key):
+                continue
+            ts = datetime.fromisoformat(t[key])
+            for e in news_events:
+                if abs((ts - datetime.fromisoformat(e["time_utc"])).total_seconds()) <= 300:
+                    near_news.append(f"#{t.get('ticket')} {key[:-4]} near {e['event']}")
+    out.append(_r("FundingPips", "No trades ±5 min of high-impact news (funded: profit not counted)",
+                  "warn" if near_news else "pass", "; ".join(near_news[:3]) or "none this week", "0"))
+    out.append(_r("FundingPips", "Weekend / overnight holding", "info", "Swing add-on bought", "required for 14-96 h trades"))
+    # ---- own rules (RULES.md) -----------------------------------------------------------------
+    ms = multi_status or {}
+    risk = float(ms.get("risk_per_trade") or 0.005) * 100
+    out.append(_r("Own", "Risk per trade", "pass" if risk <= 0.5 + 1e-9 else "warn", f"{risk:.2f}%", "0.5% (hard cap 1%)"))
+    out.append(_r("Own", "Max open positions", "fail" if len(open_tr) > 6 else "pass", len(open_tr), "≤ 6"))
+    tot = sum((t.get("risk_usd") or 0) for t in open_tr) / eq * 100 if eq else 0.0
+    out.append(_r("Own", "Total open risk", "fail" if tot > 3 else "warn" if tot > 2.5 else "pass", f"{tot:.2f}%", "≤ 3%"))
+    groups: dict[str, int] = {}
+    for t in open_tr:
+        groups[t.get("grp") or "?"] = groups.get(t.get("grp") or "?", 0) + 1
+    gmax = max(groups.values(), default=0)
+    out.append(_r("Own", "Positions per market group", "fail" if gmax > 2 else "pass", gmax, "≤ 2"))
+    syms = set(ms.get("symbols") or [])
+    bad = sorted(syms - ALLOWED_SYMBOLS)
+    out.append(_r("Own", "Only scan-approved symbols", "fail" if bad else "pass", ", ".join(sorted(syms)) or "–",
+                  "BTC, XAU(USD or EUR), DAX"))
+    gold = syms & {"XAUUSD.vx", "XAUEUR.vx"}
+    out.append(_r("Own", "Only one gold symbol", "warn" if len(gold) > 1 else "pass", ", ".join(sorted(gold)) or "none", "1"))
+    out.append(_r("Own", "BTC-only bot NOT on the same account", "fail" if processes.get("btc_live") else "pass",
+                  "running" if processes.get("btc_live") else "not running", "not running"))
+    acct_type = account.get("type")
+    out.append(_r("Own", "Demo until go-live checklist done", "pass" if acct_type == "demo" else "warn", acct_type or "?", "demo"))
+    algo = account.get("algo_terminal") and account.get("algo_account")
+    out.append(_r("Own", "Algo trading enabled", "pass" if algo else "fail", "on" if algo else "OFF", "on"))
+    out.append(_r("Own", "Kill switch clear", "fail" if kill_switch else "pass", kill_switch or "clear", "clear"))
+    for name, key in (("Trader running", "live_multi"), ("Watchdog running", "watchdog"), ("MT5 running", "mt5")):
+        out.append(_r("Own", name, "pass" if processes.get(key) else "fail", "yes" if processes.get(key) else "no", "yes"))
+    if edge:
+        out.append(_r("Own", "Edge monitor (live vs backtest)", "fail" if edge.get("retire") else "pass",
+                      f"{edge.get('live_trades')} trades, mean {edge.get('live_mean_R')} R",
+                      f"stop below {edge.get('sample_floor_R')} R" if edge.get("sample_floor_R") is not None else "starts after 20 trades"))
+        out.append(_r("Own", "Losing streak", "fail" if (edge.get("live_worst_streak") or 0) > (edge.get("streak_limit") or 99) else "pass",
+                      edge.get("live_worst_streak"), f"≤ {edge.get('streak_limit')}"))
+    out.append(_r("Own", "Prop guard wired into trader (auto-stop at limits)", "warn", "pending owner approval", "wired"))
+    return out
+
+
 def _first_balance(ch, ms, closed) -> float:
     """Account balance before the first closed trade: current balance minus realised P/L."""
     now_bal = float((ms or {}).get("balance") or (ms or {}).get("equity") or (ch or {}).get("phase_start_balance") or 0)
@@ -174,6 +261,16 @@ def processes() -> dict:
         return {"error": str(e)}
 
 
+def _week_news() -> list[dict]:
+    """All high-impact events in this week's calendar (for the news-window rule)."""
+    try:
+        from news.filter import NewsFilter
+        return [{"time_utc": e["time"].isoformat(), "event": e["event"], "currency": e["currency"]}
+                for e in NewsFilter().get_events() if e["impact"] == "HIGH"]
+    except Exception:
+        return []
+
+
 def gather() -> dict:
     now = datetime.now(timezone.utc)
     ms, bs = _json(FILES["multi_status"]), _json(FILES["btc_status"])
@@ -198,15 +295,24 @@ def gather() -> dict:
     if FILES["notify_log"].exists():
         with FILES["notify_log"].open(encoding="utf-8", errors="replace") as f:
             alerts = [ln.strip().split("NOTIFY ", 1)[-1][:300] for ln in deque(f, maxlen=15) if "NOTIFY" in ln][::-1]
+    procs = processes()
+    mkt = market(symbols)
+    kill = FILES["kill"].read_text(encoding="utf-8").strip()[:200] if FILES["kill"].exists() else None
+    try:
+        rules = rules_check(challenge=ch, account=mkt.get("account") or {}, multi_status=ms, trades=trades,
+                            processes=procs, kill_switch=kill, edge=edge, news_events=_week_news(), now=now)
+    except Exception as e:
+        rules = [_r("Own", "Rules panel", "warn", f"error: {e}")]
     return {
         "generated_utc": now.isoformat(),
-        "processes": processes(),
-        "kill_switch": FILES["kill"].read_text(encoding="utf-8").strip()[:200] if FILES["kill"].exists() else None,
+        "rules": rules,
+        "processes": procs,
+        "kill_switch": kill,
         "multi": {"status": ms, "age_min": _age_min(ms)},
         "btc": {"status": bs, "age_min": _age_min(bs)},
         "challenge": ch,
         "entry_window": next_entry_window(now),
-        "market": market(symbols),
+        "market": mkt,
         "trades": trades[-100:],
         "equity_curve": eq,
         "news": news,
