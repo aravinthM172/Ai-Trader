@@ -43,7 +43,8 @@ def test_healthy_pass_only_heartbeat(tmp_path):
     assert calls == {"restart": 0, "mt5": 0}
 
 
-def test_stale_and_dead_bot_restarts_once(tmp_path):
+def test_stale_and_dead_bot_restarts_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("WATCHDOG_WATCH_BTC", "true")
     _status(tmp_path / "s.json", age_min=30)
     ws = {}
     alerts, calls = _run(tmp_path, ws, procs=[MT5])
@@ -52,7 +53,8 @@ def test_stale_and_dead_bot_restarts_once(tmp_path):
     assert not any("NOT UPDATING" in a for a in alerts) and calls["restart"] == 0
 
 
-def test_stale_but_process_alive_does_not_restart(tmp_path):
+def test_stale_but_process_alive_does_not_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("WATCHDOG_WATCH_BTC", "true")
     _status(tmp_path / "s.json", age_min=30)
     _, calls = _run(tmp_path, {})
     assert calls["restart"] == 0
@@ -100,7 +102,8 @@ def test_telegram_kill_command_writes_file(tmp_path, monkeypatch):
     assert len(replies) == 2                                     # /resume deliberately unsupported
 
 
-def test_report_only_pass_never_acts(tmp_path):
+def test_report_only_pass_never_acts(tmp_path, monkeypatch):
+    monkeypatch.setenv("WATCHDOG_WATCH_BTC", "true")
     _status(tmp_path / "s.json", age_min=30)
     calls = {"restart": 0, "mt5": 0, "enforce": None}
 
@@ -136,3 +139,18 @@ def test_multi_checks_stale_restart_and_new_trade(tmp_path):
     alerts = wd.check_multi(NOW, ws, **kw)
     assert any("LIVE OPEN #5 NAS100.vx" in a for a in alerts)
     assert calls["restart"] == 1                                  # no second restart inside the back-off
+
+
+def test_btc_bot_never_restarted_when_multi_trades_btc(tmp_path, monkeypatch):
+    monkeypatch.setenv("MULTI_SYMBOLS", "BTCUSD.vx,XAUUSD.vx,DAX40.vx")
+    monkeypatch.delenv("WATCHDOG_WATCH_BTC", raising=False)
+    _status(tmp_path / "s.json", age_min=600)                  # BTC-only bot long dead
+    alerts, calls = _run(tmp_path, {}, procs=[MT5])
+    assert calls["restart"] == 0 and not any("NOT UPDATING" in a for a in alerts)
+
+
+def test_btc_bot_watched_when_it_is_the_active_bot(tmp_path, monkeypatch):
+    monkeypatch.setenv("MULTI_SYMBOLS", "XAUUSD.vx,DAX40.vx")
+    _status(tmp_path / "s.json", age_min=600)
+    _, calls = _run(tmp_path, {}, procs=[MT5])
+    assert calls["restart"] == 1

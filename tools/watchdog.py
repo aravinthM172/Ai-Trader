@@ -68,6 +68,17 @@ EVENT_KINDS = {"closed": "TRADE CLOSED", "order_send": "ORDER SENT", "order_chec
 
 
 # -- process checks (psutil; injectable for tests) ---------------------------
+def btc_bot_watched() -> bool:
+    """Watch/restart the BTC-only bot (execution/live.py) ONLY when it is the active bot.
+    Never when the multi-symbol trader already trades BTCUSD.vx on the same account --
+    running both would double the BTC exposure.  Override with WATCHDOG_WATCH_BTC=true/false."""
+    v = os.getenv("WATCHDOG_WATCH_BTC", "auto").strip().lower()
+    if v != "auto":
+        return v in ("1", "true", "yes", "on")
+    multi = [x.strip() for x in os.getenv("MULTI_SYMBOLS", "").split(",") if x.strip()]
+    return not (multi and "BTCUSD.vx" in multi)
+
+
 def processes() -> list[tuple[str, str]]:
     import psutil
     out = []
@@ -158,8 +169,10 @@ def check(now: datetime, ws: dict, *, procs, status_path=STATUS, db=DB, kill=KIL
         except Exception:
             age_min = None
 
-    # bot alive
-    if age_min is None or age_min > STALE_MIN:
+    # bot alive (BTC-only bot: only when it is the active bot -- see btc_bot_watched)
+    if not btc_bot_watched():
+        clear("stale")
+    elif age_min is None or age_min > STALE_MIN:
         raise_("stale", f"BOT NOT UPDATING: status is {'missing' if age_min is None else f'{age_min:.0f} min old'}")
         if (age_min is None or age_min > RESTART_MIN) and AUTO_RESTART and allow_actions and not bot_running(procs):
             last = ws.get("last_restart")
