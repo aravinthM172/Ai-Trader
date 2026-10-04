@@ -31,6 +31,10 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env.dashboard")   # dashboar
 log = get_logger("dashboard.pub", filename="dashboard_publisher.log")
 PUSH_SECONDS = int(float(os.getenv("DASHBOARD_PUSH_SECONDS", 60)))
 TICK_SECONDS = float(os.getenv("DASHBOARD_TICK_SECONDS", 3))
+ROOT = Path(__file__).resolve().parents[1]
+KILL = ROOT / "state" / "KILL_SWITCH"
+FLATTEN = ROOT / "state" / "EMERGENCY_FLATTEN"          # read by execution/live_multi.py
+PROTECTIVE = ("prop controls", "edge_monitor", "drawdown breaker")
 TICK_SYMBOLS = [x.strip() for x in os.getenv("MULTI_SYMBOLS", "BTCUSD.vx,XAUUSD.vx,DAX40.vx").split(",") if x.strip()]
 
 
@@ -76,10 +80,69 @@ def main() -> int:
                     gw = None
             if gw is not None:
                 push(ticks(gw), url=url, token=token, path="/api/tick", timeout=8.0)
+            handle_command(url, token)
         except Exception as e:
             log.debug("tick push failed: %s", e)
             gw = None
         time.sleep(max(1.0, TICK_SECONDS))
+
+
+def _http_json(url: str, token: str, *, data: dict | None = None, timeout: float = 8.0) -> dict:
+    req = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(),
+                                 method="GET" if data is None else "POST",
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
+def trader_running() -> bool:
+    try:
+        import psutil
+        return any("execution.live_multi" in " ".join(p.info["cmdline"] or []) for p in psutil.process_iter(["cmdline"]))
+    except Exception:
+        return False
+
+
+def execute_command(cmd: dict, *, kill=KILL, flatten=FLATTEN, start_task=None, running=trader_running) -> tuple[str, str]:
+    """Carry out a dashboard command on this PC.  Returns (status, message)."""
+    from datetime import datetime, timezone
+    action = cmd.get("action")
+    if action == "stop":
+        kill.parent.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).isoformat()
+        kill.write_text(stamp + "  website emergency stop\n", encoding="utf-8")
+        # Closing open positions needs execution/live_multi.py to act on a flatten flag; until the owner
+        # wires that in, the stop only blocks new entries (open trades keep their broker SL/TP).
+        log.warning("WEBSITE EMERGENCY STOP: kill switch set (no new entries)")
+        return "done", "Emergency stop: kill switch set - no new trades. Open trades keep their broker SL/TP."
+    if action == "start":
+        reason = kill.read_text(encoding="utf-8").strip() if kill.exists() else ""
+        if reason and any(k in reason for k in PROTECTIVE) and not cmd.get("force"):
+            return "refused", f"Stopped by a safety rule ({reason[:160]}). Type FORCE to override."
+        for f in (kill, flatten):
+            if f.exists():
+                f.unlink()
+        msg = "Kill switch cleared; new entries allowed."
+        if not running():
+            (start_task or _start_task)()
+            msg += " Trader was not running -> started the GoldAITrader task."
+        log.warning("WEBSITE START: %s", msg)
+        return "done", msg
+    return "failed", f"unknown action {action!r}"
+
+
+def _start_task() -> None:
+    import subprocess
+    subprocess.run(["schtasks", "/Run", "/TN", "GoldAITrader"], capture_output=True, timeout=20)
+
+
+def handle_command(url: str, token: str) -> None:
+    base = url.rstrip("/")
+    cmd = _http_json(base + "/api/command/next", token)
+    if not cmd.get("id"):
+        return
+    status, message = execute_command(cmd)
+    _http_json(base + "/api/command/ack", token, data={"id": cmd["id"], "status": status, "message": message})
 
 
 def ticks(gw) -> dict:

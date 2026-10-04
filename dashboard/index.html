@@ -63,6 +63,9 @@ ul.list { margin: 0; padding-left: 18px; } ul.list li { margin: 3px 0; }
 .cond { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .legend-line { display: inline-block; width: 18px; border-top: 2px dashed currentColor; vertical-align: middle; margin-right: 4px; }
 button.theme { margin-left: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.btn-start { border-color: var(--good); } .btn-stop { border-color: var(--critical); color: var(--critical); font-weight: 600; }
+.controls input { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); width: 150px; }
 </style>
 </head>
 <body>
@@ -73,6 +76,18 @@ button.theme { margin-left: auto; }
     <span class="small muted" id="updated"></span>
     <button class="tab theme" id="themeBtn" type="button" aria-label="Toggle theme">Theme</button>
   </header>
+
+  <section class="controls card" aria-label="Bot controls">
+    <strong>Bot</strong>
+    <button class="tab btn-start" id="btnStart" type="button">▶ Start bot</button>
+    <button class="tab btn-stop" id="btnStop" type="button">■ Emergency stop</button>
+    <span id="confirmBox" hidden>
+      <input id="confirmInput" autocomplete="off" aria-label="Type the confirmation word">
+      <button class="tab" id="confirmGo" type="button">Confirm</button>
+      <button class="tab" id="confirmCancel" type="button">Cancel</button>
+    </span>
+    <span class="small" id="cmdMsg"></span>
+  </section>
 
   <section class="grid g4" id="tiles" aria-label="Account and challenge"></section>
 
@@ -267,6 +282,12 @@ function renderChart() {
   for (const p of pos) { line(p.price_open, `${p.type} entry`, 0); if (p.sl) line(p.sl, "SL", 2); if (p.tp) line(p.tp, "TP", 2); }
   const r = d.readiness || {};
   if (!pos.length && r.plan) { line(r.plan.entry, `next ${r.plan.side}?`, 1); line(r.plan.sl, "plan SL", 1); line(r.plan.tp, "plan TP", 1); }
+  // keep SL / TP / plan lines on screen: widen the auto-scale to include them
+  const extra = priceLines.map((pl) => pl.options().price).filter((v) => isFinite(v));
+  candles.applyOptions({ autoscaleInfoProvider: (orig) => {
+    const res = orig(); if (!res || !extra.length) return res;
+    return { ...res, priceRange: { minValue: Math.min(res.priceRange.minValue, ...extra), maxValue: Math.max(res.priceRange.maxValue, ...extra) } };
+  } });
 }
 
 function renderNext() {
@@ -362,6 +383,39 @@ async function loadTick() {
     if (!liveLine) liveLine = candles.createPriceLine({ price: px, title: "live", color: css("--series-1"), lineWidth: 1, lineStyle: 0, axisLabelVisible: true });
     else liveLine.applyOptions({ price: px });
   } catch (e) { /* keep last view */ }
+}
+// ---- bot controls: command -> cloud -> trading PC (polls every 3 s) ----
+let pendingAction = null;
+function askConfirm(action) {
+  pendingAction = action; $("confirmBox").hidden = false; $("confirmInput").value = "";
+  $("confirmInput").placeholder = action === "start" ? "type START" : "type STOP";
+  $("cmdMsg").textContent = action === "stop" ? "Stops new trades now (open trades keep SL/TP)." : "Clears the kill switch and starts the trader if needed.";
+  $("confirmInput").focus();
+}
+$("btnStart").onclick = () => askConfirm("start");
+$("btnStop").onclick = () => askConfirm("stop");
+$("confirmCancel").onclick = () => { $("confirmBox").hidden = true; pendingAction = null; $("cmdMsg").textContent = ""; };
+$("confirmInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("confirmGo").click(); });
+$("confirmGo").onclick = async () => {
+  const v = $("confirmInput").value.trim().toUpperCase(), want = (pendingAction || "").toUpperCase();
+  const force = pendingAction === "start" && v === "FORCE";
+  if (v !== want && !force) { $("cmdMsg").textContent = `Type ${want} to confirm`; return; }
+  try {
+    const r = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: pendingAction, confirm: want, force }) });
+    const j = await r.json();
+    $("confirmBox").hidden = true;
+    $("cmdMsg").textContent = j.error ? "Error: " + j.error : "Sent — waiting for the trading PC…";
+    if (!j.error) pollCmd(0);
+  } catch (e) { $("cmdMsg").textContent = "Could not reach the server"; }
+};
+async function pollCmd(n) {
+  try {
+    const j = await (await fetch("/api/command", { cache: "no-store" })).json();
+    if (j.status) $("cmdMsg").textContent = `${j.action === "stop" ? "Emergency stop" : "Start"}: ${j.status} — ${j.message || ""}` +
+      (j.status === "refused" ? " (press Start and type FORCE)" : "");
+    if (j.status === "pending" && n < 70) setTimeout(() => pollCmd(n + 1), 2000); else load();
+  } catch (e) { /* ignore */ }
 }
 buildCharts(); load(); setInterval(load, 30000); setInterval(loadTick, 2000);
 </script>

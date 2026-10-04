@@ -6,6 +6,10 @@ Cloud dashboard server (runs on the Oracle Cloud VM).  Python stdlib only.
   GET  /api/state   latest snapshot + equity history   (Basic auth)
   POST /api/tick    live bid/ask every few seconds       (Bearer token)
   GET  /api/tick    latest live prices                  (Basic auth)
+  POST /api/command start / emergency stop from the page (Basic auth)
+  GET  /api/command status of the latest command        (Basic auth)
+  GET  /api/command/next  pending command for the PC    (Bearer token)
+  POST /api/command/ack   PC reports the result          (Bearer token)
   GET  /healthz     liveness                            (no auth, no data)
 
 Binds 127.0.0.1:8080 by default; Caddy in front provides HTTPS (deploy/dashboard_setup.sh).
@@ -31,6 +35,9 @@ LATEST = DATA / "latest.json"
 HISTORY = DATA / "equity_history.json"
 MAX_BODY = 8 * 1024 * 1024
 _TICK: dict = {}                                  # latest live prices (memory only)
+_CMD: dict = {}                                   # latest bot command from the dashboard (memory only)
+CMD_TTL = 120                                     # seconds a command waits for the PC before expiring
+ACTIONS = ("start", "stop")
 MAX_POINTS = 50_000
 
 
@@ -116,10 +123,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
             return self._send(200, b'{"ok":true}')
+        if self.path == "/api/command/next":
+            token, _, _ = _cfg()
+            if not bearer_ok(self.headers.get("Authorization"), token):
+                time.sleep(0.5)
+                return self._send(401, b'{"error":"auth"}')
+            pending = _CMD.get("status") == "pending" and time.time() - _CMD.get("created", 0) <= CMD_TTL
+            if _CMD.get("status") == "pending" and not pending:
+                _CMD.update(status="expired", message="PC did not pick it up within 2 minutes (is the publisher running?)")
+            return self._send(200, json.dumps(_CMD if pending else {}).encode())
         if not self._auth():
             return
         if self.path in ("/", "/index.html"):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path == "/api/command":
+            return self._send(200, json.dumps(_CMD or {}).encode())
         if self.path.startswith("/api/tick"):
             return self._send(200, json.dumps(_TICK or {"symbols": {}}).encode())
         if self.path.startswith("/api/state"):
@@ -127,6 +145,32 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path == "/api/command":                       # from the logged-in page
+            if not self._auth():
+                return
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+            except Exception:
+                return self._send(400, b'{"error":"bad json"}')
+            action = body.get("action")
+            if action not in ACTIONS or body.get("confirm") != action.upper():
+                return self._send(400, b'{"error":"action must be start/stop and confirm must be START/STOP"}')
+            _CMD.clear()
+            _CMD.update(id=f"{int(time.time() * 1000)}", action=action, force=bool(body.get("force")),
+                        created=time.time(), status="pending", message="waiting for the trading PC")
+            return self._send(200, json.dumps(_CMD).encode())
+        if self.path == "/api/command/ack":                   # from the PC
+            token, _, _ = _cfg()
+            if not bearer_ok(self.headers.get("Authorization"), token):
+                time.sleep(0.5)
+                return self._send(401, b'{"error":"auth"}')
+            try:
+                body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
+            except Exception:
+                return self._send(400, b'{"error":"bad json"}')
+            if body.get("id") == _CMD.get("id"):
+                _CMD.update(status=body.get("status", "done"), message=str(body.get("message", ""))[:500], done=time.time())
+            return self._send(200, b'{"ok":true}')
         if self.path not in ("/api/push", "/api/tick"):
             return self._send(404, b'{"error":"not found"}')
         token, _, _ = _cfg()

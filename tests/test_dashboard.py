@@ -109,3 +109,65 @@ def test_tick_endpoint_roundtrip(tmp_path, monkeypatch):
         url + "/api/tick", headers={"Authorization": "Basic " + base64.b64encode(b"u:p").decode()})))
     assert got["symbols"]["BTCUSD.vx"]["bid"] == 85000.5 and got["received"] > 0
     srv.shutdown()
+
+
+def _server(monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    monkeypatch.setenv("DASHBOARD_PUSH_TOKEN", "tok"); monkeypatch.setenv("DASHBOARD_USER", "u"); monkeypatch.setenv("DASHBOARD_PASSWORD", "p")
+    ca._CMD.clear()
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ca.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_port}"
+
+
+def _req(url, *, data=None, basic=False, bearer=False):
+    import urllib.request, urllib.error
+    h = {"Content-Type": "application/json"}
+    if basic:
+        h["Authorization"] = "Basic " + base64.b64encode(b"u:p").decode()
+    if bearer:
+        h["Authorization"] = "Bearer tok"
+    r = urllib.request.Request(url, data=None if data is None else json.dumps(data).encode(), headers=h,
+                               method="GET" if data is None else "POST")
+    try:
+        with urllib.request.urlopen(r) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+
+
+def test_command_flow_page_to_pc_and_back(monkeypatch):
+    srv, url = _server(monkeypatch)
+    assert _req(url + "/api/command", data={"action": "stop", "confirm": "NOPE"}, basic=True)[0] == 400
+    assert _req(url + "/api/command", data={"action": "stop", "confirm": "STOP"})[0] == 401          # no login
+    code, cmd = _req(url + "/api/command", data={"action": "stop", "confirm": "STOP"}, basic=True)
+    assert code == 200 and cmd["status"] == "pending"
+    assert _req(url + "/api/command/next")[0] == 401                                                   # PC needs token
+    _, nxt = _req(url + "/api/command/next", bearer=True)
+    assert nxt["id"] == cmd["id"] and nxt["action"] == "stop"
+    _req(url + "/api/command/ack", data={"id": cmd["id"], "status": "done", "message": "ok"}, bearer=True)
+    _, st = _req(url + "/api/command", basic=True)
+    assert st["status"] == "done" and _req(url + "/api/command/next", bearer=True)[1] == {}
+    srv.shutdown()
+
+
+def test_publisher_execute_stop_and_start(tmp_path):
+    from dashboard import publisher as pb
+    kill, flat = tmp_path / "K", tmp_path / "F"
+    st, msg = pb.execute_command({"action": "stop"}, kill=kill, flatten=flat, running=lambda: True)
+    assert st == "done" and kill.exists() and "website emergency stop" in kill.read_text()
+    started = []
+    st, msg = pb.execute_command({"action": "start"}, kill=kill, flatten=flat, running=lambda: False,
+                                 start_task=lambda: started.append(1))
+    assert st == "done" and not kill.exists() and started == [1]
+
+
+def test_publisher_start_refuses_to_override_safety_stop_without_force(tmp_path):
+    from dashboard import publisher as pb
+    kill = tmp_path / "K"
+    kill.write_text("2026-10-06  prop controls: equity 8.6% below initial")
+    st, _ = pb.execute_command({"action": "start"}, kill=kill, flatten=tmp_path / "F", running=lambda: True)
+    assert st == "refused" and kill.exists()
+    st, _ = pb.execute_command({"action": "start", "force": True}, kill=kill, flatten=tmp_path / "F", running=lambda: True)
+    assert st == "done" and not kill.exists()
