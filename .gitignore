@@ -29,3 +29,6 @@ data/raw/
 data/dashboard/
 data/mt5_H1/
 data/calendar_cache.json
+
+# dashboard publisher settings (push token)
+.env.dashboard

@@ -4,7 +4,7 @@ Runs on the TRADING PC.  Every PUSH_SECONDS it collects a read-only snapshot
 cloud can reach this PC, MT5 or the bot.  If the cloud is down, the push fails quietly and
 the bot is unaffected.
 
-.env on the PC:
+.env (or .env.dashboard, git-ignored) on the PC:
     DASHBOARD_URL=https://<your-host>          (e.g. https://141-1-2-3.sslip.io)
     DASHBOARD_PUSH_TOKEN=<long random secret>  (same value on the cloud server)
 
@@ -19,6 +19,7 @@ import json
 import os
 import time
 import urllib.request
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -26,6 +27,7 @@ from common.logging_setup import get_logger
 from dashboard.data import gather
 
 load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.dashboard")   # dashboard-only settings (git-ignored)
 log = get_logger("dashboard.pub", filename="dashboard_publisher.log")
 PUSH_SECONDS = int(float(os.getenv("DASHBOARD_PUSH_SECONDS", 60)))
 
