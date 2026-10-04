@@ -24,3 +24,8 @@ gold-ai-trader-bundle.tar.gz
 
 # third-party raw data (CC BY-SA, kept local)
 data/raw/
+
+# dashboard snapshots (account data)
+data/dashboard/
+data/mt5_H1/
+data/calendar_cache.json

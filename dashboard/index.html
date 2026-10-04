@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trader Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f4f2; --surface: #fcfcfb; --border: #e3e2de;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --up: #2a78d6; --down: #e34948; --series-1: #2a78d6; --grid: #ecebe7;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --up: #3987e5; --down: #e66767; --series-1: #3987e5; --grid: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --border: #2e2e2b;
+  --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --up: #3987e5; --down: #e66767; --series-1: #3987e5; --grid: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); margin: 0 0 10px; }
+.muted { color: var(--text-muted); } .small { font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+.grid { display: grid; gap: 12px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g2 { grid-template-columns: 1fr; } }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); font-size: 12px; color: var(--text-primary); background: var(--surface); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .sub { color: var(--text-muted); font-size: 12px; }
+.bar { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.bar > span { display: block; height: 100%; border-radius: 4px; background: var(--series-1); }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.tab { border: 1px solid var(--border); background: var(--surface); color: var(--text-primary);
+  padding: 5px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
+.tab[aria-selected="true"] { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+#chart { height: 420px; } #equity { height: 220px; }
+@media (max-width: 600px) { #chart { height: 320px; } }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 500; }
+.scroll { overflow-x: auto; }
+ul.list { margin: 0; padding-left: 18px; } ul.list li { margin: 3px 0; }
+.cond { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.legend-line { display: inline-block; width: 18px; border-top: 2px dashed currentColor; vertical-align: middle; margin-right: 4px; }
+button.theme { margin-left: auto; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Trader Dashboard</h1>
+    <div class="chips" id="chips"></div>
+    <span class="small muted" id="updated"></span>
+    <button class="tab theme" id="themeBtn" type="button" aria-label="Toggle theme">Theme</button>
+  </header>
+
+  <section class="grid g4" id="tiles" aria-label="Account and challenge"></section>
+
+  <section class="grid g2" style="margin-top:12px">
+    <div class="card">
+      <h2>Price · H1</h2>
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div id="chart" aria-label="Candlestick chart with trades"></div>
+      <div class="small muted" style="margin-top:6px">
+        ▲ buy / ▼ sell entries, ● exits · <span class="legend-line"></span>open SL / TP ·
+        <span class="legend-line" style="border-top-style:dotted"></span>next-trade plan (if the signal fires)
+      </div>
+    </div>
+    <div class="card" id="nextCard">
+      <h2>Next trade</h2>
+      <div id="next"></div>
+    </div>
+  </section>
+
+  <section class="grid g2" style="margin-top:12px">
+    <div class="card"><h2>Realised balance</h2><div id="equity" aria-label="Balance over time"></div>
+      <div class="small muted" id="eqNote"></div></div>
+    <div class="card"><h2>Open positions</h2><div class="scroll" id="positions"></div></div>
+  </section>
+
+  <section class="grid g2" style="margin-top:12px">
+    <div class="card"><h2>Trades</h2><div class="scroll" id="trades"></div></div>
+    <div class="grid">
+      <div class="card"><h2>News blackouts (72 h)</h2><div id="news"></div></div>
+      <div class="card"><h2>Live vs backtest</h2><div id="edge"></div></div>
+      <div class="card"><h2>Latest alerts</h2><div id="alerts"></div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (n, d = 2) => (n === null || n === undefined || isNaN(n)) ? "–" : Number(n).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const money = (n) => (n === null || n === undefined) ? "–" : "$" + fmt(n);
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "style") e.style.cssText = v; else e.setAttribute(k, v); }
+  for (const k of kids) e.append(k instanceof Node ? k : document.createTextNode(String(k ?? ""))); return e; };
+const STATUS = { good: ["--good", "✓"], warning: ["--warning", "!"], serious: ["--serious", "!"], critical: ["--critical", "✕"] };
+const chip = (level, text) => { const [v, icon] = STATUS[level];
+  return el("span", {class: "chip"}, el("span", {class: "dot", style: `background:var(${v})`}), `${icon} ${text}`); };
+
+let S = null, sym = null, chart, candles, eqChart, eqSeries, priceLines = [];
+
+function theme() {
+  const t = document.documentElement.getAttribute("data-theme");
+  const dark = t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  try { localStorage.setItem("theme", document.documentElement.getAttribute("data-theme")); } catch (e) {}
+  buildCharts(); render();
+}
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+$("themeBtn").onclick = theme;
+
+function chartOpts(h) {
+  return { height: h, layout: { background: { color: css("--surface") }, textColor: css("--text-secondary"), fontSize: 11 },
+    grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+    rightPriceScale: { borderColor: css("--border") }, timeScale: { borderColor: css("--border"), timeVisible: true },
+    crosshair: { mode: 0 } };
+}
+function buildCharts() {
+  $("chart").innerHTML = ""; $("equity").innerHTML = ""; priceLines = [];
+  chart = LightweightCharts.createChart($("chart"), chartOpts($("chart").clientHeight));
+  candles = chart.addCandlestickSeries({ upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+    wickUpColor: css("--up"), wickDownColor: css("--down") });
+  eqChart = LightweightCharts.createChart($("equity"), chartOpts($("equity").clientHeight));
+  eqSeries = eqChart.addLineSeries({ color: css("--series-1"), lineWidth: 2 });
+  new ResizeObserver(() => { chart.applyOptions({ width: $("chart").clientWidth }); eqChart.applyOptions({ width: $("equity").clientWidth }); })
+    .observe($("chart"));
+}
+
+function renderHeader() {
+  const c = $("chips"); c.innerHTML = "";
+  const age = S.received_utc ? (Date.now() - Date.parse(S.received_utc)) / 60000 : null;
+  c.append(age === null ? chip("critical", "no data") : age > 5 ? chip("critical", `PC silent ${age.toFixed(0)} min`) : chip("good", "PC online"));
+  const p = S.processes || {};
+  c.append(p.live_multi ? chip("good", "trader running") : chip("critical", "trader stopped"));
+  c.append(p.watchdog ? chip("good", "watchdog") : chip("warning", "no watchdog"));
+  c.append(p.mt5 ? chip("good", "MT5") : chip("critical", "MT5 closed"));
+  if (p.btc_live) c.append(chip("warning", "BTC-only bot also running"));
+  const m = (S.multi || {}).status || {};
+  c.append(m.mode === "LIVE" ? chip("good", "LIVE orders") : chip("warning", `dry-run${m.send_block_reason ? ": " + m.send_block_reason : ""}`));
+  const a = (S.market || {}).account || {};
+  if (a.login) c.append(a.algo_terminal && a.algo_account ? chip("good", "algo trading on") : chip("critical", "algo trading OFF"));
+  if (S.kill_switch) c.append(chip("critical", "KILL SWITCH"));
+  const w = S.entry_window || {};
+  c.append(el("span", {class: "chip"}, w.open_now ? "entry window open" : `next entry window in ${fmt(w.in_min, 0)} min`));
+  $("updated").textContent = S.received_utc ? `updated ${new Date(S.received_utc).toLocaleString()}` : "";
+}
+
+function tile(label, value, sub, pct) {
+  const t = el("div", {class: "card tile"}, el("div", {class: "label"}, label), el("div", {class: "value"}, value),
+    el("div", {class: "sub"}, sub || ""));
+  if (pct !== undefined && pct !== null) t.append(el("div", {class: "bar"}, el("span", {style: `width:${Math.max(0, Math.min(100, pct))}%`})));
+  return t;
+}
+function renderTiles() {
+  const T = $("tiles"); T.innerHTML = "";
+  const a = (S.market || {}).account || {}, ch = S.challenge;
+  T.append(tile("Equity", money(a.equity), `balance ${money(a.balance)} · ${a.type || ""} ${a.login || ""}`));
+  if (ch) {
+    const base = ch.phase_start_balance, tgt = ch.target_usd, eq = a.equity ?? base;
+    const prog = tgt && base ? 100 * (eq - base) / (tgt - base) : null;
+    T.append(tile(`Challenge · phase ${ch.phase} · ${ch.result}`, `${fmt(ch.profit_pct)}%`,
+      `target ${money(tgt)} · ${(ch.trading_days || []).length} trading days`, prog));
+    T.append(tile("Room today (daily loss)", money(ch.daily_headroom_usd), `limit 5% of day start · today ${fmt(ch.daily_loss_pct)}%`,
+      100 * (ch.daily_headroom_usd || 0) / (base * 0.05)));
+    T.append(tile("Total room (max loss)", money(ch.total_headroom_usd), `never below ${money(base * 0.9)}`,
+      100 * (ch.total_headroom_usd || 0) / (base * 0.10)));
+  } else {
+    const m = (S.multi || {}).status || {};
+    T.append(tile("Closed trades", fmt(m.closed_trades, 0), `net ${money(m.net_pl_usd)}`));
+    T.append(tile("Avg R / trade", fmt(m.expectancy_R, 3), "backtest ≈ +0.17 R"));
+    T.append(tile("Open positions", fmt((m.open_positions || []).length, 0), ""));
+  }
+}
+
+function renderTabs() {
+  const syms = Object.keys((S.market || {}).symbols || {});
+  if (!sym || !syms.includes(sym)) sym = syms[0];
+  const t = $("tabs"); t.innerHTML = "";
+  for (const s of syms) { const b = el("button", {class: "tab", role: "tab", "aria-selected": String(s === sym), type: "button"}, s.replace(".vx", ""));
+    b.onclick = () => { sym = s; render(); }; t.append(b); }
+}
+
+function renderChart() {
+  const d = ((S.market || {}).symbols || {})[sym]; if (!d || !d.candles) return;
+  candles.setData(d.candles);
+  for (const pl of priceLines) candles.removePriceLine(pl); priceLines = [];
+  const hour = (iso) => Math.floor(Date.parse(iso) / 3600000) * 3600;
+  const marks = [];
+  for (const t of (S.trades || []).filter((t) => t.symbol === sym)) {
+    const buy = t.direction === "BUY";
+    marks.push({ time: hour(t.opened_utc), position: buy ? "belowBar" : "aboveBar", color: buy ? css("--up") : css("--down"),
+      shape: buy ? "arrowUp" : "arrowDown", text: `${t.direction} ${t.volume}` });
+    if (t.closed_utc) marks.push({ time: hour(t.closed_utc), position: buy ? "aboveBar" : "belowBar", color: css("--text-muted"),
+      shape: "circle", text: `${t.exit_reason || "exit"} ${t.r_multiple != null ? fmt(t.r_multiple, 2) + "R" : ""}` });
+  }
+  marks.sort((a, b) => a.time - b.time); candles.setMarkers(marks);
+  const line = (price, title, style) => priceLines.push(candles.createPriceLine({ price, title, color: css("--text-secondary"),
+    lineWidth: 1, lineStyle: style, axisLabelVisible: true }));
+  const pos = (((S.multi || {}).status || {}).open_positions || []).filter((p) => p.symbol === sym);
+  for (const p of pos) { line(p.price_open, `${p.type} entry`, 0); if (p.sl) line(p.sl, "SL", 2); if (p.tp) line(p.tp, "TP", 2); }
+  const r = d.readiness || {};
+  if (!pos.length && r.plan) { line(r.plan.entry, `next ${r.plan.side}?`, 1); line(r.plan.sl, "plan SL", 1); line(r.plan.tp, "plan TP", 1); }
+}
+
+function renderNext() {
+  const N = $("next"); N.innerHTML = "";
+  const d = ((S.market || {}).symbols || {})[sym] || {}, r = d.readiness || {};
+  if (r.error || d.error) { N.append(el("div", {class: "muted"}, r.error || d.error)); return; }
+  const fired = r.decision !== "HOLD";
+  N.append(el("div", {style: "font-size:20px;font-weight:600"}, `${sym.replace(".vx", "")}: ${fired ? r.decision + " signal" : "no signal"}`));
+  N.append(el("div", {class: "small muted"}, `from bar ${new Date(r.signal_bar_utc).toLocaleString()} · closest side ${r.closest_side} (${r.met}/3 conditions)`));
+  const names = { rsi: `RSI14 ${r.closest_side === "BUY" ? "≥ 60" : "≤ 40"} (now ${fmt(r.rsi, 1)})`,
+    momentum: `8-bar momentum ${r.closest_side === "BUY" ? "up" : "down"}`, trend: `price ${r.closest_side === "BUY" ? "above" : "below"} EMA96` };
+  for (const [k, ok] of Object.entries(r.conditions || {}))
+    N.append(el("div", {class: "cond"}, chip(ok ? "good" : "warning", ok ? "met" : "not yet"), names[k]));
+  if (r.plan) {
+    N.append(el("h2", {style: "margin-top:12px"}, fired ? "Order at next bar open" : `If ${r.closest_side} fires`));
+    const tb = el("table");
+    for (const [k, v] of [["Entry ≈", r.plan.entry], ["Stop loss (2 ATR)", r.plan.sl], ["Take profit (3 ATR)", r.plan.tp]])
+      tb.append(el("tr", {}, el("td", {}, k), el("td", {}, fmt(v, v > 100 ? 2 : 5))));
+    N.append(tb);
+  }
+  N.append(el("div", {class: "small muted", style: "margin-top:8px"},
+    "Before sending, the bot also checks: news blackout, portfolio limits, spread, prop-challenge room, and the entry window (first 15 min of the hour)."));
+  const blocked = (((S.multi || {}).status || {}).entries || {})[sym];
+  if (blocked && blocked.reason) N.append(el("div", {class: "small", style: "margin-top:6px"}, `Last check: ${blocked.decision} — ${blocked.reason}`));
+}
+
+function table(rows, cols) {
+  if (!rows.length) return el("div", {class: "muted"}, "none");
+  const t = el("table"), h = el("tr"); cols.forEach(([, label]) => h.append(el("th", {}, label))); t.append(h);
+  for (const r of rows) { const tr = el("tr"); cols.forEach(([k, , f]) => tr.append(el("td", {}, f ? f(r[k], r) : (r[k] ?? "–")))); t.append(tr); }
+  return t;
+}
+function renderTables() {
+  const pos = ((S.multi || {}).status || {}).open_positions || [];
+  $("positions").replaceChildren(table(pos, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
+    ["sl", "SL"], ["tp", "TP"], ["profit", "P/L", (v) => money(v)]]));
+  const tr = [...(S.trades || [])].reverse().slice(0, 30);
+  $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? new Date(v).toLocaleString() : "–"], ["symbol", "Symbol"],
+    ["direction", "Side"], ["volume", "Lots"], ["entry", "Entry"], ["exit", "Exit"], ["exit_reason", "Exit"],
+    ["pnl_usd", "P/L", (v) => money(v)], ["r_multiple", "R", (v) => fmt(v, 2)]]));
+  const news = S.news || [];
+  $("news").replaceChildren(news.length ? el("ul", {class: "list"}, ...news.map((n) =>
+    el("li", {}, `${new Date(n.time_utc).toLocaleString()} · ${n.currency} · ${n.event}`))) : el("div", {class: "muted"}, "no high-impact events"));
+  const e = S.edge;
+  $("edge").replaceChildren(!e ? el("div", {class: "muted"}, "no reference yet") : el("div", {},
+    e.retire ? chip("critical", "edge monitor: RETIRE") : chip("good", "edge OK"),
+    el("div", {class: "small", style: "margin-top:6px"}, `${e.live_trades} live trades · mean ${fmt(e.live_mean_R, 3)} R · backtest ${fmt(e.reference_mean_R, 3)} R`),
+    el("div", {class: "small muted"}, e.note || `stop if below ${fmt(e.sample_floor_R, 3)} R · losing streak ${e.live_worst_streak}/${e.streak_limit}`)));
+  const al = S.alerts || [];
+  $("alerts").replaceChildren(al.length ? el("ul", {class: "list small"}, ...al.slice(0, 8).map((a) => el("li", {}, a))) : el("div", {class: "muted"}, "none"));
+}
+
+function renderEquity() {
+  const h = (S.equity_history || []).map((p) => ({ time: p.time, value: p.equity }));
+  const curve = h.length > 1 ? h : (S.equity_curve || []);
+  eqSeries.setData(curve);
+  $("eqNote").textContent = h.length > 1 ? "equity incl. open trades, sampled every minute" : "realised balance after each closed trade";
+}
+
+function render() {
+  if (!S) return;
+  if (S.error) { $("updated").textContent = S.error; return; }
+  renderHeader(); renderTiles(); renderTabs(); renderChart(); renderNext(); renderEquity(); renderTables();
+}
+async function load() {
+  try { const r = await fetch("/api/state", {cache: "no-store"}); S = await r.json(); render(); }
+  catch (e) { $("updated").textContent = "cannot reach dashboard server"; }
+}
+buildCharts(); load(); setInterval(load, 30000);
+</script>
+</body>
+</html>

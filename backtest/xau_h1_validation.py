@@ -128,7 +128,7 @@ def main() -> int:
     cut = int(N * 0.6)
     fp, _ = strat.build_momentum(c[:cut], h[:cut], l[:cut], **CANDIDATES["momentum_rsi_mtf"][1])
     fu, _ = strat.build_momentum(c, h, l, **CANDIDATES["momentum_rsi_mtf"][1])
-    rep["leakage_probe"] = {"signal_identical_pre_truncation": bool(np.array_equal(fu[:cut - 1], fp[:cut - 1]))}
+    rep["leakage_probe"] = {"signal_identical_pre_truncation": bool(np.array_equal(fu[:cut], fp[:cut]))}
 
     log.info("strategies")
     evals = {}

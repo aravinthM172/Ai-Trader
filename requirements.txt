@@ -6,3 +6,5 @@ numba
 ta
 anthropic
 pytest
+psutil
+mcp

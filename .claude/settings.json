@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Edit(./.env)",
+      "Write(./.env)",
+      "Edit(./execution/live.py)",
+      "Write(./execution/live.py)",
+      "Edit(./execution/safety.py)",
+      "Write(./execution/safety.py)",
+      "Edit(./strategy/btc_h1_signal.py)",
+      "Write(./strategy/btc_h1_signal.py)",
+      "Edit(./state/**)",
+      "Write(./state/**)",
+      "Bash(*LIVE_TRADING=true*)",
+      "Bash(*KILL_SWITCH*)",
+      "Edit(./execution/live_multi.py)",
+      "Write(./execution/live_multi.py)",
+      "Edit(./risk/portfolio_guard.py)",
+      "Write(./risk/portfolio_guard.py)",
+      "Bash(*MULTI_LIVE_TRADING=true*)"
+    ]
+  }
+}

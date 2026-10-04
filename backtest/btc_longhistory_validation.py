@@ -133,7 +133,7 @@ def main() -> int:
     ent, wu = bld(c, h, l, **kw)
     cut = int(N * 0.6)
     part, _ = bld(c[:cut], h[:cut], l[:cut], **kw)
-    rep["look_ahead_probe"] = "no look-ahead detected" if np.array_equal(ent[:cut - 1], part[:cut - 1]) else "LEAKAGE"
+    rep["look_ahead_probe"] = "no look-ahead detected" if np.array_equal(ent[:cut], part[:cut]) else "LEAKAGE"
 
     v = load(VALETAX)
     vc, vh, vl = (v[k].to_numpy(float) for k in ("close", "high", "low"))

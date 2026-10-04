@@ -99,7 +99,7 @@ def leakage_probe(df):
     full, _ = strat.build_trend(c, h, l, adx_min=20.0, atr_rank_max=0.85)
     cut = int(len(c) * 0.6)
     part, _ = strat.build_trend(c[:cut], h[:cut], l[:cut], adx_min=20.0, atr_rank_max=0.85)
-    same = bool(np.array_equal(full[:cut - 1], part[:cut - 1]))
+    same = bool(np.array_equal(full[:cut], part[:cut]))
     return {"truncation_bar": cut, "signal_identical_pre_truncation": same,
             "verdict": "no look-ahead detected" if same else "LEAKAGE -- signal changed"}
 
@@ -187,7 +187,7 @@ def main() -> int:
     # leakage probe on THIS strategy
     cut = int(N * 0.6)
     fp, _ = bld(c[:cut], h[:cut], l[:cut], **kw)
-    leak_ok = bool(np.array_equal(be[:cut - 1], fp[:cut - 1]))
+    leak_ok = bool(np.array_equal(be[:cut], fp[:cut]))
 
     # random-direction null: same entry bars, coin-flip direction
     rng = np.random.default_rng(7)
