@@ -92,6 +92,7 @@ def test_new_events_and_trades_after_first_run(tmp_path):
 
 def test_telegram_kill_command_writes_file(tmp_path, monkeypatch):
     monkeypatch.setattr(wd, "multi_enabled", lambda: False)      # isolate from real status files
+    monkeypatch.setattr(wd.challenge_tracker, "enabled", lambda: False)
     _status(tmp_path / "s.json")
     replies = wd.handle_commands(["/kill", "/status", "/resume"], kill=tmp_path / "KILL",
                                  status_path=tmp_path / "s.json")
