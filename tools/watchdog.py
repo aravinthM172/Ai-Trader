@@ -375,12 +375,25 @@ def handle_commands(cmds: list[str], kill=KILL, status_path=STATUS) -> list[str]
     return replies
 
 
+def keep_awake() -> None:
+    """Windows: block idle sleep while the watchdog runs (released automatically on exit).
+    The display may still turn off; MT5 and the bots keep running."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+    if not ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED):
+        log.warning("could not block idle sleep -- set Windows sleep to 'Never'")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--interval", type=int, default=60)
     a = ap.parse_args()
     ws = load_state()
+    if not a.once:
+        keep_awake()
     if a.once:
         now, procs, tmp = datetime.now(timezone.utc), processes(), dict(ws)
         msgs = check(now, tmp, procs=procs, allow_actions=False)
