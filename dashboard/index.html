@@ -223,12 +223,16 @@ function renderTiles() {
   if (ch) {
     const base = ch.phase_start_balance, tgt = ch.target_usd, eq = a.equity ?? base;
     const prog = tgt && base ? 100 * (eq - base) / (tgt - base) : null;
-    T.append(tile(`Challenge · phase ${ch.phase} · ${ch.result}`, `${fmt(ch.profit_pct)}%`,
-      `target ${money(tgt)} · ${(ch.trading_days || []).length} trading days`, prog));
-    T.append(tile("Room today (daily loss)", money(ch.daily_headroom_usd), `limit 5% of day start · today ${fmt(ch.daily_loss_pct)}%`,
-      100 * (ch.daily_headroom_usd || 0) / (base * 0.05)));
-    T.append(tile("Total room (max loss)", money(ch.total_headroom_usd), `never below ${money(base * 0.9)}`,
-      100 * (ch.total_headroom_usd || 0) / (base * 0.10)));
+    const t1 = tile(`Challenge · phase ${ch.phase} · ${ch.result}`, `${fmt(ch.profit_pct)}%`,
+      `target ${money(tgt)} · ${(ch.trading_days || []).length} trading days`, prog);
+    const t2 = tile("Room today (daily loss)", money(ch.daily_headroom_usd), `limit 5% of day start · today ${fmt(ch.daily_loss_pct)}%`,
+      100 * (ch.daily_headroom_usd || 0) / (base * 0.05));
+    const t3 = tile("Total room (max loss)", money(ch.total_headroom_usd), `never below ${money(base * 0.9)}`,
+      100 * (ch.total_headroom_usd || 0) / (base * 0.10));
+    [[t1, "chProfit"], [t2, "chToday"], [t3, "chTotal"]].forEach(([t, id]) => {
+      t.querySelector(".value").id = id; t.querySelector(".sub").id = id + "Sub";
+      const b = t.querySelector(".bar > span"); if (b) b.id = id + "Bar"; });
+    T.append(t1, t2, t3);
   } else {
     const m = (S.multi || {}).status || {};
     T.append(tile("Closed trades", fmt(m.closed_trades, 0), `net ${money(m.net_pl_usd)}`));
@@ -255,6 +259,23 @@ function renderRules() {
     }
     R.append(el("div", {class: "scroll"}, t));
   }
+}
+
+// recompute the challenge tiles from live equity (same rules as tools/challenge_tracker.py)
+function liveChallenge(eq) {
+  const ch = S && S.challenge; if (!ch || !isFinite(eq) || !$("chProfit")) return;
+  const base = Number(ch.phase_start_balance), tgt = Number(ch.target_usd), ref = Number(ch.day_ref || base);
+  const pct = 100 * (eq / base - 1), today = 100 * (ref - eq) / ref;
+  const roomToday = ref * 0.05 - (ref - eq), roomTotal = base * 0.10 - (base - eq);
+  const pc = $("chProfit"); pc.textContent = `${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct))}%`;
+  pc.className = "value " + (pct > 0 ? "pl-pos" : pct < 0 ? "pl-neg" : "pl-flat");
+  $("chProfitSub").textContent = `target ${money(tgt)} · ${money(Math.max(0, tgt - eq))} to go · ${(ch.trading_days || []).length} trading days`;
+  if ($("chProfitBar")) $("chProfitBar").style.width = Math.max(0, Math.min(100, 100 * (eq - base) / (tgt - base))) + "%";
+  $("chToday").textContent = money(roomToday);
+  $("chTodaySub").textContent = `limit 5% of ${money(ref)} · today ${today > 0 ? "−" : "+"}${fmt(Math.abs(today))}%`;
+  if ($("chTodayBar")) $("chTodayBar").style.width = Math.max(0, Math.min(100, 100 * roomToday / (ref * 0.05))) + "%";
+  $("chTotal").textContent = money(roomTotal);
+  if ($("chTotalBar")) $("chTotalBar").style.width = Math.max(0, Math.min(100, 100 * roomTotal / (base * 0.10))) + "%";
 }
 
 function renderTabs() {
@@ -377,16 +398,18 @@ async function loadTick() {
   try {
     const r = await fetch("/api/tick", {cache: "no-store"}); const T = await r.json();
     const q = (T.symbols || {})[sym];
-    if (T.account && $("liveEquity") && ageS !== null && ageS < 15) {
+    const ageS = T.received ? Date.now() / 1000 - T.received : null;
+    const fresh = ageS !== null && ageS < 15;
+    if (T.account && fresh) liveChallenge(Number(T.account.equity));
+    if (T.account && $("liveEquity") && fresh) {
       $("liveEquity").textContent = money(T.account.equity);
       $("liveEquitySub").textContent = `balance ${money(T.account.balance)} · ${T.account.open} open`;
       setPL("liveOpenPL", T.account.floating);
       if ($("liveOpenPLSub")) $("liveOpenPLSub").textContent = `${T.account.open} open trade${T.account.open === 1 ? "" : "s"} · updates every 3 s`;
     }
-    if (T.positions && ageS !== null && ageS < 15)
+    if (T.positions && fresh)
       $("positions").replaceChildren(table(T.positions, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
         ["sl", "SL"], ["tp", "TP"], ["profit", "P/L (live)", (v) => plSpan(v)]]));
-    const ageS = T.received ? Date.now() / 1000 - T.received : null;
     $("liveTag").textContent = q ? `${sym.replace(".vx", "")} ${fmt(q.bid, q.bid > 100 ? 2 : 5)} · ${ageS !== null && ageS < 15 ? "live" : "prices " + fmt(ageS / 60, 0) + " min old"}` : "no live prices (publisher not running)";
     if (!q || !q.time_utc || !lastBar) return;
     const t = Date.parse(q.time_utc) / 1000; if (t <= lastTick) return; lastTick = t;
