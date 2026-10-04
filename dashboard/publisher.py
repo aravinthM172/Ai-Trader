@@ -85,6 +85,15 @@ def main() -> int:
 def ticks(gw) -> dict:
     """Latest bid/ask per symbol (small, sent every few seconds for the live chart)."""
     out = {"time": time.time(), "symbols": {}}
+    try:
+        acct = gw.account_info()
+        pos = gw.positions()
+        out["account"] = {"equity": acct.get("equity"), "balance": acct.get("balance"),
+                          "floating": round(sum(p["profit"] for p in pos), 2), "open": len(pos)}
+        out["positions"] = [{"symbol": p["symbol"], "type": p["type"], "volume": p["volume"],
+                             "price_open": p["price_open"], "sl": p["sl"], "tp": p["tp"], "profit": p["profit"]} for p in pos]
+    except Exception:
+        pass
     for s in TICK_SYMBOLS:
         t = gw.get_tick(s)
         if t and t.get("bid"):

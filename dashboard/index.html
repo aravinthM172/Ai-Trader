@@ -187,7 +187,9 @@ function tile(label, value, sub, pct) {
 function renderTiles() {
   const T = $("tiles"); T.innerHTML = "";
   const a = (S.market || {}).account || {}, ch = S.challenge;
-  T.append(tile("Equity", money(a.equity), `balance ${money(a.balance)} · ${a.type || ""} ${a.login || ""}`));
+  const eqTile = tile("Equity · live", money(a.equity), `balance ${money(a.balance)} · ${a.type || ""} ${a.login || ""}`);
+  eqTile.querySelector(".value").id = "liveEquity"; eqTile.querySelector(".sub").id = "liveEquitySub";
+  T.append(eqTile);
   if (ch) {
     const base = ch.phase_start_balance, tgt = ch.target_usd, eq = a.equity ?? base;
     const prog = tgt && base ? 100 * (eq - base) / (tgt - base) : null;
@@ -339,6 +341,13 @@ async function loadTick() {
   try {
     const r = await fetch("/api/tick", {cache: "no-store"}); const T = await r.json();
     const q = (T.symbols || {})[sym];
+    if (T.account && $("liveEquity") && ageS !== null && ageS < 15) {
+      $("liveEquity").textContent = money(T.account.equity);
+      $("liveEquitySub").textContent = `balance ${money(T.account.balance)} · open P/L ${money(T.account.floating)} · ${T.account.open} open`;
+    }
+    if (T.positions && ageS !== null && ageS < 15)
+      $("positions").replaceChildren(table(T.positions, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
+        ["sl", "SL"], ["tp", "TP"], ["profit", "P/L (live)", (v) => money(v)]]));
     const ageS = T.received ? Date.now() / 1000 - T.received : null;
     $("liveTag").textContent = q ? `${sym.replace(".vx", "")} ${fmt(q.bid, q.bid > 100 ? 2 : 5)} · ${ageS !== null && ageS < 15 ? "live" : "prices " + fmt(ageS / 60, 0) + " min old"}` : "no live prices (publisher not running)";
     if (!q || !q.time_utc || !lastBar) return;
