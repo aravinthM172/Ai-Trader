@@ -64,3 +64,76 @@ def test_btc_excluded_from_default_symbols(monkeypatch, tmp_path):
     monkeypatch.setattr(lm, "REPORTS", tmp_path)
     monkeypatch.delenv("MULTI_SYMBOLS", raising=False)
     assert lm.symbols() == ["NAS100.vx"]
+
+
+# ---- prop controls wiring -------------------------------------------------------------
+import json as _json
+from datetime import timedelta as _td
+from tools.challenge_tracker import trading_day as _tday0
+_tday = lambda t: _tday0(t, 21)
+
+
+def _prop_env(tmp_path, monkeypatch, challenge):
+    from tools import challenge_tracker as ct
+    out = tmp_path / "challenge.json"
+    out.write_text(_json.dumps(challenge))
+    monkeypatch.setattr(ct, "enabled", lambda: True)
+    monkeypatch.setattr(ct, "OUT", out)
+    monkeypatch.setattr(lm, "STATE", tmp_path)
+    monkeypatch.setattr(lm.safety, "kill_switch_active", lambda: False)
+    closed = []
+    monkeypatch.setattr(lm, "_close", lambda gw, spec, p, reason, c: closed.append((p["ticket"], reason)) or True)
+    c = lm._conn(tmp_path / "t.sqlite")
+    return c, closed
+
+
+CH1 = {"result": "in_progress", "phase": 1, "phase_start_balance": 5000.0}
+NOW1 = datetime(2026, 10, 6, 10, 5, tzinfo=timezone.utc)
+POS = [{"ticket": 1, "symbol": "XAUUSD.vx", "type": "BUY", "profit": -120.0},
+       {"ticket": 2, "symbol": "DAX40.vx", "type": "SELL", "profit": -95.0}]
+SPECS = {"XAUUSD.vx": object(), "DAX40.vx": object()}
+
+
+def test_prop_daily_flatten_closes_all_when_live(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    ls = {"prop_day": _tday(NOW1), "prop_day_ref": 5000.0}
+    d = lm._prop_controls(None, c, ls, POS, SPECS, 4785.0, 5000.0, NOW1, True)      # -4.3 % today
+    assert d.flatten_all and sorted(t for t, _ in closed) == [1, 2] and ls["prop_halt_day"]
+
+
+def test_prop_dry_run_only_logs(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    d = lm._prop_controls(None, c, {"prop_day": "x"}, POS, SPECS, 4785.0, 5000.0, NOW1, False)
+    assert closed == [] and d.flatten_all is False or closed == []
+    kinds = [r[0] for r in c.execute("SELECT kind FROM events")]
+    assert closed == [] and (not d.flatten_all or "would_close" in kinds)
+
+
+def test_prop_idea_loss_closes_only_that_trade(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    pos = [{"ticket": 1, "symbol": "XAUUSD.vx", "type": "BUY", "profit": -46.0},
+           {"ticket": 2, "symbol": "DAX40.vx", "type": "SELL", "profit": -10.0}]
+    d = lm._prop_controls(None, c, {}, pos, SPECS, 4944.0, 5000.0, NOW1, True)
+    assert closed == [(1, "idea_loss")] and not d.flatten_all
+
+
+def test_prop_max_loss_writes_kill_switch(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    d = lm._prop_controls(None, c, {"prop_day": _tday(NOW1),
+                                    "prop_day_ref": 4600.0}, POS, SPECS, 4570.0, 4600.0, NOW1, True)
+    assert d.kill and (tmp_path / "KILL_SWITCH").exists() and len(closed) == 2
+
+
+def test_prop_cooldown_from_recent_losing_close(tmp_path, monkeypatch):
+    c, _ = _prop_env(tmp_path, monkeypatch, CH1)
+    c.execute("INSERT INTO trades(ticket, symbol, status, closed_utc, pnl_usd) VALUES(9,'DAX40.vx','CLOSED',?,-20)",
+              ((NOW1 - _td(minutes=3)).isoformat(),))
+    c.commit()
+    d = lm._prop_controls(None, c, {}, [], SPECS, 5000.0, 5000.0, NOW1, True)
+    assert not d.allow_entries and any("cooldown" in r for r in d.reasons)
+
+
+def test_prop_idle_when_not_configured(monkeypatch, tmp_path):
+    from tools import challenge_tracker as ct
+    monkeypatch.setattr(ct, "enabled", lambda: False)
+    assert lm._prop_controls(None, None, {}, [], {}, 5000.0, 5000.0, NOW1, True) is None

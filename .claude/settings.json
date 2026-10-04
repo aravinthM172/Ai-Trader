@@ -18,6 +18,10 @@
       "Write(./execution/live_multi.py)",
       "Edit(./risk/portfolio_guard.py)",
       "Write(./risk/portfolio_guard.py)",
+      "Edit(./risk/prop_controls.py)",
+      "Write(./risk/prop_controls.py)",
+      "Edit(./risk/prop_guard.py)",
+      "Write(./risk/prop_guard.py)",
       "Bash(*MULTI_LIVE_TRADING=true*)"
     ]
   }

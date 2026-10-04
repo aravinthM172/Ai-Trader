@@ -238,7 +238,13 @@ def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | N
                       f"stop below {edge.get('sample_floor_R')} R" if edge.get("sample_floor_R") is not None else "starts after 20 trades"))
         out.append(_r("Own", "Losing streak", "fail" if (edge.get("live_worst_streak") or 0) > (edge.get("streak_limit") or 99) else "pass",
                       edge.get("live_worst_streak"), f"≤ {edge.get('streak_limit')}"))
-    out.append(_r("Own", "Prop guard wired into trader (auto-stop at limits)", "warn", "pending owner approval", "wired"))
+    prop = ms.get("prop")
+    if prop is None:
+        out.append(_r("Own", "Prop controls active in trader", "warn", "not reported (PROP_CHALLENGE off or trader not running)", "active"))
+    else:
+        out.append(_r("Own", "Prop controls active in trader", "pass" if prop.get("allow_entries") else "info",
+                      "; ".join(prop.get("reasons") or []) or f"entries allowed, risk {100 * (prop.get('risk_cap') or 0):.2f}%",
+                      "stop -3.5%/day, flatten -4.25%/day, flatten+kill -8.5% total, close idea at -0.9%, 10 min post-loss cooldown"))
     return out
 
 

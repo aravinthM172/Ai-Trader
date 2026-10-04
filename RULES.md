@@ -70,7 +70,17 @@ Requirements before setting `LIVE_ACCOUNT_MODE=real` in `.env`:
   89 % prop-challenge pass. **Backtest numbers; at +0.10 R/trade live expect ~25–30 %/yr.**
 - Watchdog monitors it and runs its own edge monitor against `reports/multi_reference_trades.csv`.
 
-## 8. Prop-firm accounts
-`risk/prop_guard.py` (tested) blocks entries at −3.5 % daily / −7 % from initial balance and
-flattens at −4.25 % daily / −8.5 % from initial — before the firm's 5 % / 10 %. **Not yet wired into
-`live_multi.py`: that file is on the agent lock; wiring needs the owner's approval.**
+## 8. Prop-firm accounts (wired 2026-10-04, owner approved)
+Active in `execution/live_multi.py` whenever `PROP_CHALLENGE` is set (logic in `risk/prop_controls.py`):
+| Trigger | Action |
+|---|---|
+| Daily equity loss ≥ 3.5% of the day's baseline (higher of opening balance/equity; day starts 21:00 UTC) | no new entries today |
+| Daily equity loss ≥ 4.25% | close all bot positions, halt until the next trading day |
+| Equity ≥ 7% below the phase starting balance | no new entries |
+| Equity ≥ 8.5% below the phase starting balance | close all, write KILL_SWITCH |
+| Phase target reached (+8% phase 1, +5% phase 2) | no new entries (pass locked in) |
+| One trade idea's floating loss ≥ 0.9% of account size | close it (stays under the 1% strike trigger) |
+| A losing trade closed < 10 minutes ago | no new entry (avoids "trade idea" grouping) |
+| Little daily room left | risk per trade shrinks so all open stops fit inside the remaining room |
+Firm limits: 5% daily, 10% static max loss, 30-day inactivity (tracked), funded-only news window.
+Reward cycle on the funded account: **Bi-weekly 80%** (the 35% consistency rule blocks Monthly in ~2 of 3 months).

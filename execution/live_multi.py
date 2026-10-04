@@ -49,6 +49,7 @@ from execution import safety
 from execution.order_validator import build_request
 from news.filter import NewsFilter
 from risk import portfolio_guard as pg
+from risk import prop_controls
 from strategy import btc_h1_signal
 
 load_dotenv()
@@ -315,7 +316,7 @@ def run_once(*, now: datetime | None = None) -> dict:
         ls["peak_equity"] = max(float(ls.get("peak_equity") or 0.0), equity)
         send_ok, send_why = live_send_allowed(acct)
         status.update(mode="LIVE" if send_ok else "DRY_RUN", send_block_reason=None if send_ok else send_why,
-                      equity=equity, peak_equity=ls["peak_equity"])
+                      equity=equity, balance=float(acct.get("balance") or equity), peak_equity=ls["peak_equity"])
         magics = {magic_for(s): s for s in syms}
         _sync_closed(gw, c, set(magics))
         groups, specs = {}, {}
@@ -338,6 +339,12 @@ def run_once(*, now: datetime | None = None) -> dict:
                 if not (row and _ensure_sl(gw, spec, p, row[0], row[1], c)):
                     _close(gw, spec, p, "no_sl", c)
         mine = [p for p in gw.positions() if p["magic"] in magics]
+
+        # prop-firm controls (only when a challenge rehearsal / prop account is configured)
+        prop = _prop_controls(gw, c, ls, mine, specs, equity, float(acct.get("balance") or equity), now, send_ok)
+        if prop is not None:
+            status["prop"] = prop.to_dict()
+            mine = [p for p in gw.positions() if p["magic"] in magics]
         status["open_positions"] = mine
 
         # entries
@@ -348,6 +355,8 @@ def run_once(*, now: datetime | None = None) -> dict:
             status["entries"]["*"] = "kill switch active"
         elif into_bar > ENTRY_WINDOW_S:
             status["entries"]["*"] = f"{into_bar:.0f}s into the bar > window {ENTRY_WINDOW_S:.0f}s"
+        elif prop is not None and not prop.allow_entries:
+            status["entries"]["*"] = "prop controls: " + "; ".join(prop.reasons)
         else:
             news = NewsFilter(fail_closed=_env_b("MULTI_NEWS_FAIL_CLOSED"))
             gst = guard_state(c, mine, groups, equity, ls["peak_equity"], now)
@@ -355,8 +364,9 @@ def run_once(*, now: datetime | None = None) -> dict:
                 key = f"{s}|{due}"
                 if key in evaluated:
                     continue
-                status["entries"][s] = res = _evaluate_symbol(gw, mt5, c, s, specs[s], groups[s], due, now, equity,
-                                                              news, gst, send_ok, ls)
+                status["entries"][s] = res = _evaluate_symbol(
+                    gw, mt5, c, s, specs[s], groups[s], due, now, equity, news, gst, send_ok, ls,
+                    risk=min(RISK_PER_TRADE, prop.risk_cap) if prop is not None else RISK_PER_TRADE)
                 if res.get("final"):
                     evaluated[key] = res.get("decision", "done")
         ls["evaluated"] = dict(sorted(evaluated.items())[-2000:])
@@ -371,7 +381,8 @@ def run_once(*, now: datetime | None = None) -> dict:
         c.close()
 
 
-def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, send_ok, ls) -> dict:
+def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, send_ok, ls,
+                     risk: float = RISK_PER_TRADE) -> dict:
     if spec is None:
         return {"decision": "skip", "reason": "no symbol spec", "final": True}
     df = gw.get_rates(s, "H1", 400)
@@ -395,7 +406,7 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         return {**out, "decision": "retry", "reason": f"spread {tick['spread']:.5g} > {MAX_SPREAD_ATR} x ATR {atr:.5g}"}
     px = tick["ask"] if sig.decision == "BUY" else tick["bid"]
     sl, tp, sl_d = stop_plan(sig.decision, px, atr, spec.stops_level_price)
-    vol, risk_usd, note = size_volume(equity=equity, risk_frac=RISK_PER_TRADE, max_risk_frac=MAX_RISK_PER_TRADE,
+    vol, risk_usd, note = size_volume(equity=equity, risk_frac=risk, max_risk_frac=MAX_RISK_PER_TRADE,
                                       sl_dist=sl_d, value_per_unit=spec.value_per_price_unit_per_lot,
                                       vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
     if vol <= 0:
@@ -421,6 +432,45 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         log.warning("LIVE OPEN #%s %s %s %.2f @ %.5g SL %.5g TP %.5g risk $%.2f", res["ticket"], s, sig.decision, vol,
                     res["fill"], res["sl"], res["tp"], risk_usd)
     return {**out, "decision": "sent" if res.get("ok") else "send_failed", "result": res, "final": True}
+
+
+def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok):
+    """Apply risk/prop_controls when a prop challenge is configured (PROP_CHALLENGE in .env)."""
+    from tools import challenge_tracker as ct
+    if not ct.enabled():
+        return None
+    try:
+        ch = json.loads(ct.OUT.read_text(encoding="utf-8"))
+    except Exception:
+        ch = None
+    rules = ct.FUNDINGPIPS_2STEP_STANDARD
+    day = ct.trading_day(now, rules.day_reset_utc_hour)
+    if ls.get("prop_day") != day:                       # firm baseline: higher of balance / equity at day start
+        ls["prop_day"], ls["prop_day_ref"] = day, max(balance, equity)
+    if ch is not None:
+        ch = dict(ch, day_ref=ls["prop_day_ref"])
+    row = c.execute("SELECT MAX(closed_utc) FROM trades WHERE status='CLOSED' AND pnl_usd < 0").fetchone()
+    last_loss = datetime.fromisoformat(row[0]) if row and row[0] else None
+    d = prop_controls.decide(challenge=ch, equity=equity, positions=mine, last_losing_close=last_loss, now=now,
+                             trading_day=day, halted_day=ls.get("prop_halt_day"), base_risk=RISK_PER_TRADE)
+    if d.halt_today:
+        ls["prop_halt_day"] = day
+    for p in [p for p in mine if d.flatten_all or p["ticket"] in d.close_tickets]:
+        spec = specs.get(p["symbol"])
+        if spec is None:
+            continue
+        reason = "prop_flatten" if d.flatten_all else "idea_loss"
+        if send_ok:
+            _close(gw, spec, p, reason, c)
+        else:
+            _event(c, "would_close", {"ticket": p["ticket"], "symbol": p["symbol"], "reason": reason})
+        log.warning("PROP CONTROL %s #%s %s (P/L %.2f): %s", "CLOSE" if send_ok else "WOULD CLOSE", p["ticket"],
+                    p["symbol"], p.get("profit") or 0.0, "; ".join(d.reasons))
+    if d.kill and send_ok and not safety.kill_switch_active():
+        reasons = "; ".join(d.reasons)
+        (STATE / "KILL_SWITCH").write_text(f"{now.isoformat()}  prop controls: {reasons}\n", encoding="utf-8")
+        log.critical("KILL SWITCH TRIPPED by prop controls: %s", "; ".join(d.reasons))
+    return d
 
 
 def _write_status(st: dict) -> None:
