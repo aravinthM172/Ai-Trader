@@ -44,7 +44,8 @@ class ChallengeRules:
     min_days: tuple = (3, 3)
     daily_loss: float = 0.05
     max_loss: float = 0.10
-    day_reset_utc_hour: int = 22        # broker/firm server midnight (EET) ~ 21:00-22:00 UTC
+    day_reset_utc_hour: int = 21        # FundingPips server time is UTC+3 -> trading day starts 21:00 UTC
+    inactivity_days: int = 30           # hard breach: no completed trade within 30 consecutive days
 
 
 FUNDINGPIPS_2STEP_STANDARD = ChallengeRules()
@@ -63,7 +64,7 @@ def new_state(balance: float, now: datetime, rules: ChallengeRules = FUNDINGPIPS
 
 
 def update(st: dict, *, now: datetime, equity: float, balance: float, traded_days: set[str],
-           rules: ChallengeRules = FUNDINGPIPS_2STEP_STANDARD) -> list[str]:
+           rules: ChallengeRules = FUNDINGPIPS_2STEP_STANDARD, last_closed: datetime | None = None) -> list[str]:
     """Advance the challenge state with one observation; returns event messages."""
     events: list[str] = []
     if st["result"] in ("passed", "failed"):
@@ -87,6 +88,16 @@ def update(st: dict, *, now: datetime, equity: float, balance: float, traded_day
     i = st["phase"] - 1
     st["target_usd"] = round(base * (1 + rules.targets[i]), 2)
 
+    since = last_closed or datetime.fromisoformat(st["started_utc"])
+    st["days_since_last_closed_trade"] = round((now - since).total_seconds() / 86400, 1)
+    if st["days_since_last_closed_trade"] >= rules.inactivity_days:
+        st["result"] = "failed"
+        events.append(f"CHALLENGE FAILED (phase {st['phase']}): no completed trade for {rules.inactivity_days} days (inactivity)")
+        return events
+    if st["days_since_last_closed_trade"] >= rules.inactivity_days - 10 and st.get("warn_inactive") != st["day"]:
+        st["warn_inactive"] = st["day"]
+        events.append(f"challenge warning: no completed trade for {st['days_since_last_closed_trade']:.0f} days "
+                      f"(breach at {rules.inactivity_days})")
     if daily >= rules.daily_loss:
         st["result"] = "failed"
         events.append(f"CHALLENGE FAILED (phase {st['phase']}): daily loss {daily:.2%} >= {rules.daily_loss:.0%}")
@@ -126,6 +137,17 @@ def _traded_days(db: Path, reset_hour: int) -> set[str]:
         c.close()
 
 
+def _last_closed(db: Path) -> datetime | None:
+    if not db.exists():
+        return None
+    c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        r = c.execute("SELECT MAX(closed_utc) FROM trades WHERE status='CLOSED'").fetchone()
+        return datetime.fromisoformat(r[0]) if r and r[0] else None
+    finally:
+        c.close()
+
+
 def enabled() -> bool:
     return os.getenv("PROP_CHALLENGE", "").strip().lower() in ("fundingpips_2step_standard", "1", "true", "on")
 
@@ -146,7 +168,7 @@ def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: 
     except Exception:
         st = new_state(balance, now, rules)
     ev = update(st, now=now, equity=equity, balance=balance,
-                traded_days=_traded_days(db, rules.day_reset_utc_hour), rules=rules)
+                traded_days=_traded_days(db, rules.day_reset_utc_hour), rules=rules, last_closed=_last_closed(db))
     state_path.parent.mkdir(exist_ok=True)
     state_path.write_text(json.dumps(st, indent=2), encoding="utf-8")
     out.write_text(json.dumps(st, indent=2), encoding="utf-8")

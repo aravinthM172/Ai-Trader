@@ -174,8 +174,8 @@ def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | N
         days = len(ch.get("trading_days") or [])
         out.append(_r("FundingPips", "Minimum trading days", "pass" if days >= 3 else "info", days, "≥ 3"))
         dl = float(ch.get("daily_loss_pct") or 0)
-        out.append(_r("FundingPips", "Daily loss", "fail" if dl >= 5 else "warn" if dl >= 3.5 else "pass",
-                      f"{dl:.2f}% (room ${ch.get('daily_headroom_usd')})", "< 5% of day start"))
+        out.append(_r("FundingPips", "Daily loss (day starts 21:00 UTC)", "fail" if dl >= 5 else "warn" if dl >= 3.5 else "pass",
+                      f"{dl:.2f}% (room ${ch.get('daily_headroom_usd')})", "< 5% of higher of opening balance/equity"))
         tl = 100 * (base - eq) / base if base and eq else 0.0
         out.append(_r("FundingPips", "Max loss (static from start)", "fail" if tl >= 10 else "warn" if tl >= 7 else "pass",
                       f"{max(tl, 0):.2f}% (room ${ch.get('total_headroom_usd')})", f"< 10% (never below ${base * 0.9:,.0f})" if base else "< 10%"))
@@ -194,8 +194,16 @@ def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | N
             for e in news_events:
                 if abs((ts - datetime.fromisoformat(e["time_utc"])).total_seconds()) <= 300:
                     near_news.append(f"#{t.get('ticket')} {key[:-4]} near {e['event']}")
-    out.append(_r("FundingPips", "No trades ±5 min of high-impact news (funded: profit not counted)",
-                  "warn" if near_news else "pass", "; ".join(near_news[:3]) or "none this week", "0"))
+    phase = ch.get("phase")
+    funded = phase not in (1, 2)
+    out.append(_r("FundingPips", "News window (funded only: ±5 min news / ±10 min speeches; trades opened 5 h+ before are exempt)",
+                  ("warn" if near_news else "pass") if funded else "info",
+                  ("; ".join(near_news[:3]) or "none this week") if funded else "no news restriction during evaluation",
+                  "profit deducted, not a breach"))
+    idle = ch.get("days_since_last_closed_trade")
+    if idle is not None:
+        out.append(_r("FundingPips", "Inactivity (a trade must close within 30 days)",
+                      "fail" if idle >= 30 else "warn" if idle >= 20 else "pass", f"{idle:.0f} days since last closed trade", "< 30 days"))
     out.append(_r("FundingPips", "Weekend / overnight holding", "info", "Swing add-on bought", "required for 14-96 h trades"))
     # ---- own rules (RULES.md) -----------------------------------------------------------------
     ms = multi_status or {}

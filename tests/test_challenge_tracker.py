@@ -7,7 +7,7 @@ T0 = datetime(2026, 10, 6, 8, 0, tzinfo=timezone.utc)
 
 
 def _days(n, start=T0):
-    return {ct.trading_day(start + timedelta(days=k), 22) for k in range(n)}
+    return {ct.trading_day(start + timedelta(days=k), 21) for k in range(n)}
 
 
 def test_phase1_needs_target_and_min_days_then_phase2_rebases():
@@ -52,3 +52,18 @@ def test_run_from_files(tmp_path):
                            out=tmp_path / "o.json")
     st = json.loads((tmp_path / "st.json").read_text())
     assert ev == [] and st["phase"] == 1 and st["target_usd"] == 5400.0
+
+
+def test_inactivity_warns_then_fails():
+    st = ct.new_state(5000, T0)
+    ev = ct.update(st, now=T0 + timedelta(days=21), equity=5000, balance=5000, traded_days=set(), last_closed=None)
+    assert any("no completed trade for 21 days" in e for e in ev) and st["result"] == "in_progress"
+    ev = ct.update(st, now=T0 + timedelta(days=30, hours=1), equity=5000, balance=5000, traded_days=set(), last_closed=None)
+    assert st["result"] == "failed" and any("inactivity" in e for e in ev)
+
+
+def test_recent_trade_resets_inactivity_clock():
+    st = ct.new_state(5000, T0)
+    ct.update(st, now=T0 + timedelta(days=29), equity=5000, balance=5000, traded_days=set(),
+              last_closed=T0 + timedelta(days=25))
+    assert st["result"] == "in_progress" and st["days_since_last_closed_trade"] == 4.0

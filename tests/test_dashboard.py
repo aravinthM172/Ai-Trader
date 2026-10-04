@@ -73,7 +73,7 @@ def _rules(**over):
 def test_rules_healthy_state_has_no_failures():
     st = _rules()
     assert "fail" not in st.values()
-    assert st["Daily loss"] == "pass" and st["Minimum trading days"] == "pass" and st["Max open positions"] == "pass"
+    assert st["Daily loss (day starts 21:00 UTC)"] == "pass" and st["Minimum trading days"] == "pass" and st["Max open positions"] == "pass"
 
 
 def test_rules_flag_breaches():
@@ -81,7 +81,7 @@ def test_rules_flag_breaches():
           "trading_days": [], "daily_loss_pct": 5.2, "daily_headroom_usd": -10, "total_headroom_usd": 240}
     st = _rules(challenge=ch, account={"equity": 4740.0, "type": "demo", "algo_terminal": False, "algo_account": True},
                 processes={"live_multi": True, "watchdog": False, "mt5": True, "btc_live": True})
-    assert st["Daily loss"] == "fail" and st["Algo trading enabled"] == "fail"
+    assert st["Daily loss (day starts 21:00 UTC)"] == "fail" and st["Algo trading enabled"] == "fail"
     assert st["BTC-only bot NOT on the same account"] == "fail" and st["Watchdog running"] == "fail"
     assert st["Max loss (static from start)"] == "pass"          # 5.2 % < 7 % warn line
 
@@ -91,7 +91,7 @@ def test_rules_news_window_and_position_caps():
               for k in range(7)]
     st = _rules(trades=trades, news_events=[{"time_utc": "2026-10-07T18:00:00+00:00", "event": "FOMC"}])
     assert st["Max open positions"] == "fail" and st["Positions per market group"] == "fail"
-    assert st["No trades ±5 min of high-impact news (funded: profit not counted)"] == "warn"
+    assert st["News window (funded only: ±5 min news / ±10 min speeches; trades opened 5 h+ before are exempt)"] == "info"   # evaluation phase
 
 
 def test_tick_endpoint_roundtrip(tmp_path, monkeypatch):
