@@ -37,7 +37,7 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: v
 .muted { color: var(--text-muted); } .small { font-size: 12px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
 .grid { display: grid; gap: 12px; }
-.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .g2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 @media (max-width: 900px) { .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g2 { grid-template-columns: 1fr; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -63,6 +63,7 @@ ul.list { margin: 0; padding-left: 18px; } ul.list li { margin: 3px 0; }
 .cond { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
 .legend-line { display: inline-block; width: 18px; border-top: 2px dashed currentColor; vertical-align: middle; margin-right: 4px; }
 button.theme { margin-left: auto; }
+.pl-pos { color: var(--good); font-weight: 600; } .pl-neg { color: var(--critical); font-weight: 600; } .pl-flat { color: var(--text-secondary); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .btn-start { border-color: var(--good); } .btn-stop { border-color: var(--critical); color: var(--critical); font-weight: 600; }
 .controls input { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); width: 150px; }
@@ -144,6 +145,15 @@ const chip = (level, text) => { const [v, icon] = STATUS[level];
   return el("span", {class: "chip"}, el("span", {class: "dot", style: `background:var(${v})`}), `${icon} ${text}`); };
 
 let S = null, sym = null, chart, candles, eqChart, eqSeries, priceLines = [];
+// profit / loss with colour + sign + arrow (never colour alone)
+function plText(v) { if (v === null || v === undefined || isNaN(v)) return "–"; const n = Number(v);
+  return (n > 0 ? "▲ +" : n < 0 ? "▼ −" : "") + "$" + fmt(Math.abs(n)); }
+function plSpan(v, txt) { const n = Number(v);
+  return el("span", { class: n > 0 ? "pl-pos" : n < 0 ? "pl-neg" : "pl-flat" }, txt ?? plText(v)); }
+function rSpan(v) { if (v === null || v === undefined) return "–"; const n = Number(v);
+  return plSpan(n, (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n), 2) + " R"); }
+function setPL(id, v) { const e = $(id); if (!e) return; const n = Number(v);
+  e.textContent = plText(v); e.className = "value " + (n > 0 ? "pl-pos" : n < 0 ? "pl-neg" : "pl-flat"); }
 let tf = "M1", lastBar = null, liveLine = null, lastTick = 0;
 const TF_SEC = { M1: 60, H1: 3600 };
 
@@ -205,6 +215,11 @@ function renderTiles() {
   const eqTile = tile("Equity · live", money(a.equity), `balance ${money(a.balance)} · ${a.type || ""} ${a.login || ""}`);
   eqTile.querySelector(".value").id = "liveEquity"; eqTile.querySelector(".sub").id = "liveEquitySub";
   T.append(eqTile);
+  const openPos = ((S.multi || {}).status || {}).open_positions || [];
+  const openPL = openPos.reduce((a, p) => a + (Number(p.profit) || 0), 0);
+  const plTile = tile("Open P/L · live", "", `${openPos.length} open trade${openPos.length === 1 ? "" : "s"}`);
+  plTile.querySelector(".value").id = "liveOpenPL"; plTile.querySelector(".sub").id = "liveOpenPLSub";
+  T.append(plTile); setPL("liveOpenPL", openPL);
   if (ch) {
     const base = ch.phase_start_balance, tgt = ch.target_usd, eq = a.equity ?? base;
     const prog = tgt && base ? 100 * (eq - base) / (tgt - base) : null;
@@ -323,11 +338,11 @@ function table(rows, cols) {
 function renderTables() {
   const pos = ((S.multi || {}).status || {}).open_positions || [];
   $("positions").replaceChildren(table(pos, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
-    ["sl", "SL"], ["tp", "TP"], ["profit", "P/L", (v) => money(v)]]));
+    ["sl", "SL"], ["tp", "TP"], ["profit", "P/L", (v) => plSpan(v)]]));
   const tr = [...(S.trades || [])].reverse().slice(0, 30);
   $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? new Date(v).toLocaleString() : "–"], ["symbol", "Symbol"],
     ["direction", "Side"], ["volume", "Lots"], ["entry", "Entry"], ["exit", "Exit"], ["exit_reason", "Exit"],
-    ["pnl_usd", "P/L", (v) => money(v)], ["r_multiple", "R", (v) => fmt(v, 2)]]));
+    ["pnl_usd", "P/L", (v) => v === null || v === undefined ? "open" : plSpan(v)], ["r_multiple", "R", (v) => rSpan(v)]]));
   const news = S.news || [];
   $("news").replaceChildren(news.length ? el("ul", {class: "list"}, ...news.map((n) =>
     el("li", {}, `${new Date(n.time_utc).toLocaleString()} · ${n.currency} · ${n.event}`))) : el("div", {class: "muted"}, "no high-impact events"));
@@ -364,11 +379,13 @@ async function loadTick() {
     const q = (T.symbols || {})[sym];
     if (T.account && $("liveEquity") && ageS !== null && ageS < 15) {
       $("liveEquity").textContent = money(T.account.equity);
-      $("liveEquitySub").textContent = `balance ${money(T.account.balance)} · open P/L ${money(T.account.floating)} · ${T.account.open} open`;
+      $("liveEquitySub").textContent = `balance ${money(T.account.balance)} · ${T.account.open} open`;
+      setPL("liveOpenPL", T.account.floating);
+      if ($("liveOpenPLSub")) $("liveOpenPLSub").textContent = `${T.account.open} open trade${T.account.open === 1 ? "" : "s"} · updates every 3 s`;
     }
     if (T.positions && ageS !== null && ageS < 15)
       $("positions").replaceChildren(table(T.positions, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
-        ["sl", "SL"], ["tp", "TP"], ["profit", "P/L (live)", (v) => money(v)]]));
+        ["sl", "SL"], ["tp", "TP"], ["profit", "P/L (live)", (v) => plSpan(v)]]));
     const ageS = T.received ? Date.now() / 1000 - T.received : null;
     $("liveTag").textContent = q ? `${sym.replace(".vx", "")} ${fmt(q.bid, q.bid > 100 ? 2 : 5)} · ${ageS !== null && ageS < 15 ? "live" : "prices " + fmt(ageS / 60, 0) + " min old"}` : "no live prices (publisher not running)";
     if (!q || !q.time_utc || !lastBar) return;
