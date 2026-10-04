@@ -137,3 +137,26 @@ def test_prop_idle_when_not_configured(monkeypatch, tmp_path):
     from tools import challenge_tracker as ct
     monkeypatch.setattr(ct, "enabled", lambda: False)
     assert lm._prop_controls(None, None, {}, [], {}, 5000.0, 5000.0, NOW1, True) is None
+
+
+def test_emergency_flatten_closes_everything_when_allowed(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    r = lm._emergency_flatten(None, c, POS, SPECS, True)
+    assert sorted(t for t, why in closed) == [1, 2] and all(why == "emergency" for _, why in closed) and r["positions"] == 2
+
+
+def test_emergency_flatten_dry_run_only_logs(tmp_path, monkeypatch):
+    c, closed = _prop_env(tmp_path, monkeypatch, CH1)
+    r = lm._emergency_flatten(None, c, POS, SPECS, False)
+    assert closed == [] and all(x.get("dry_run") for x in r["results"])
+    assert [k[0] for k in c.execute("SELECT kind FROM events")] == ["would_close", "would_close"]
+
+
+def test_close_allowed_ignores_kill_switch_but_not_account_mode(monkeypatch):
+    monkeypatch.setenv("MULTI_LIVE_TRADING", "true"); monkeypatch.setenv("LIVE_TRADING", "true")
+    monkeypatch.delenv("LIVE_ACCOUNT_MODE", raising=False)
+    monkeypatch.setattr(lm.safety, "kill_switch_active", lambda: True)
+    assert lm.close_allowed({"trade_mode": 0}) is True            # demo, kill switch on -> may still close
+    assert lm.close_allowed({"trade_mode": 2}) is False           # real account not allowed by LIVE_ACCOUNT_MODE
+    monkeypatch.setenv("MULTI_LIVE_TRADING", "false")
+    assert lm.close_allowed({"trade_mode": 0}) is False

@@ -156,7 +156,7 @@ def test_publisher_execute_stop_and_start(tmp_path):
     from dashboard import publisher as pb
     kill, flat = tmp_path / "K", tmp_path / "F"
     st, msg = pb.execute_command({"action": "stop"}, kill=kill, flatten=flat, running=lambda: True)
-    assert st == "done" and kill.exists() and "website emergency stop" in kill.read_text()
+    assert st == "done" and kill.exists() and "website emergency stop" in kill.read_text() and flat.exists()
     started = []
     st, msg = pb.execute_command({"action": "start"}, kill=kill, flatten=flat, running=lambda: False,
                                  start_task=lambda: started.append(1))

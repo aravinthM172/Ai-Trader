@@ -389,7 +389,7 @@ let pendingAction = null;
 function askConfirm(action) {
   pendingAction = action; $("confirmBox").hidden = false; $("confirmInput").value = "";
   $("confirmInput").placeholder = action === "start" ? "type START" : "type STOP";
-  $("cmdMsg").textContent = action === "stop" ? "Stops new trades now (open trades keep SL/TP)." : "Clears the kill switch and starts the trader if needed.";
+  $("cmdMsg").textContent = action === "stop" ? "Stops new trades AND closes all open bot trades at market." : "Clears the kill switch and starts the trader if needed.";
   $("confirmInput").focus();
 }
 $("btnStart").onclick = () => askConfirm("start");

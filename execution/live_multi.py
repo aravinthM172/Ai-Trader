@@ -60,6 +60,7 @@ STATE = ROOT / "state"
 REPORTS = ROOT / "reports"
 DB = STATE / "multi_live.sqlite"
 LS = STATE / "multi_live_state.json"
+FLATTEN = STATE / "EMERGENCY_FLATTEN"             # set by the website Emergency stop (dashboard/publisher.py)
 COMMENT = "mom-multi"
 MAGIC_BASE = 26_100_000
 SL_ATR, TP_ATR = 2.0, 3.0
@@ -110,6 +111,15 @@ def symbols() -> list[str]:
 
 def magic_for(symbol: str) -> int:
     return MAGIC_BASE + zlib.crc32(symbol.encode()) % 100_000
+
+
+def close_allowed(account: dict) -> bool:
+    """Closing positions is allowed with the kill switch ON (an emergency stop must still flatten),
+    but only on the account type the owner allowed and with live trading enabled."""
+    if not (_env_b("MULTI_LIVE_TRADING") and safety.live_trading_enabled()):
+        return False
+    mode = _ACCOUNT_MODES.get(int(account.get("trade_mode", -1)), "unknown")
+    return mode == os.getenv("LIVE_ACCOUNT_MODE", "demo").strip().lower()
 
 
 def live_send_allowed(account: dict) -> tuple[bool, str]:
@@ -341,6 +351,11 @@ def run_once(*, now: datetime | None = None) -> dict:
         mine = [p for p in gw.positions() if p["magic"] in magics]
 
         # prop-firm controls (only when a challenge rehearsal / prop account is configured)
+        if FLATTEN.exists():
+            status["emergency_flatten"] = _emergency_flatten(gw, c, mine, specs, close_allowed(acct))
+            mine = [p for p in gw.positions() if p["magic"] in magics]
+            if not mine:
+                FLATTEN.unlink(missing_ok=True)
         prop = _prop_controls(gw, c, ls, mine, specs, equity, float(acct.get("balance") or equity), now, send_ok)
         if prop is not None:
             status["prop"] = prop.to_dict()
@@ -432,6 +447,23 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         log.warning("LIVE OPEN #%s %s %s %.2f @ %.5g SL %.5g TP %.5g risk $%.2f", res["ticket"], s, sig.decision, vol,
                     res["fill"], res["sl"], res["tp"], risk_usd)
     return {**out, "decision": "sent" if res.get("ok") else "send_failed", "result": res, "final": True}
+
+
+def _emergency_flatten(gw, c, mine, specs, allowed: bool) -> dict:
+    """Close every bot position at market (website Emergency stop)."""
+    done = []
+    for p in mine:
+        spec = specs.get(p["symbol"])
+        if spec is None:
+            continue
+        if allowed:
+            ok = _close(gw, spec, p, "emergency", c)
+            done.append({"ticket": p["ticket"], "symbol": p["symbol"], "closed": bool(ok)})
+            log.critical("EMERGENCY CLOSE #%s %s -> %s", p["ticket"], p["symbol"], "closed" if ok else "FAILED")
+        else:
+            _event(c, "would_close", {"ticket": p["ticket"], "symbol": p["symbol"], "reason": "emergency"})
+            done.append({"ticket": p["ticket"], "symbol": p["symbol"], "closed": False, "dry_run": True})
+    return {"positions": len(mine), "results": done, "allowed": allowed}
 
 
 def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok):

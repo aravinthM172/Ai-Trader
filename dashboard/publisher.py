@@ -111,10 +111,9 @@ def execute_command(cmd: dict, *, kill=KILL, flatten=FLATTEN, start_task=None, r
         kill.parent.mkdir(exist_ok=True)
         stamp = datetime.now(timezone.utc).isoformat()
         kill.write_text(stamp + "  website emergency stop\n", encoding="utf-8")
-        # Closing open positions needs execution/live_multi.py to act on a flatten flag; until the owner
-        # wires that in, the stop only blocks new entries (open trades keep their broker SL/TP).
-        log.warning("WEBSITE EMERGENCY STOP: kill switch set (no new entries)")
-        return "done", "Emergency stop: kill switch set - no new trades. Open trades keep their broker SL/TP."
+        flatten.write_text(stamp, encoding="utf-8")         # execution/live_multi.py closes all bot positions
+        log.warning("WEBSITE EMERGENCY STOP: kill switch set, trader closing all bot positions")
+        return "done", "Emergency stop: no new trades, and the trader is closing all open bot trades (within ~30 s)."
     if action == "start":
         reason = kill.read_text(encoding="utf-8").strip() if kill.exists() else ""
         if reason and any(k in reason for k in PROTECTIVE) and not cmd.get("force"):
