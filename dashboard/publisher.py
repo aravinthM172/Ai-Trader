@@ -30,11 +30,13 @@ load_dotenv()
 load_dotenv(Path(__file__).resolve().parents[1] / ".env.dashboard")   # dashboard-only settings (git-ignored)
 log = get_logger("dashboard.pub", filename="dashboard_publisher.log")
 PUSH_SECONDS = int(float(os.getenv("DASHBOARD_PUSH_SECONDS", 60)))
+TICK_SECONDS = float(os.getenv("DASHBOARD_TICK_SECONDS", 3))
+TICK_SYMBOLS = [x.strip() for x in os.getenv("MULTI_SYMBOLS", "BTCUSD.vx,XAUUSD.vx,DAX40.vx").split(",") if x.strip()]
 
 
-def push(snapshot: dict, *, url: str, token: str, timeout: float = 20.0) -> int:
+def push(snapshot: dict, *, url: str, token: str, timeout: float = 20.0, path: str = "/api/push") -> int:
     body = gzip.compress(json.dumps(snapshot, default=str).encode())
-    req = urllib.request.Request(url.rstrip("/") + "/api/push", data=body, method="POST", headers={
+    req = urllib.request.Request(url.rstrip("/") + path, data=body, method="POST", headers={
         "Authorization": f"Bearer {token}", "Content-Type": "application/json", "Content-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status
@@ -48,19 +50,47 @@ def main() -> int:
     if not (url and token):
         print("set DASHBOARD_URL and DASHBOARD_PUSH_TOKEN in .env")
         return 1
+    gw, last_full = None, 0.0
     while True:
+        if time.time() - last_full >= PUSH_SECONDS or a.once:
+            last_full = time.time()
+            try:
+                if gw is not None:                      # gather() opens its own connection
+                    gw.shutdown()
+                    gw = None
+                code = push(gather(), url=url, token=token)
+                log.info("pushed snapshot -> %s", code)
+                if a.once:
+                    print(f"pushed -> HTTP {code}")
+            except Exception as e:
+                log.warning("push failed: %s", e)
+                if a.once:
+                    print(f"push failed: {e}")
+            if a.once:
+                return 0
         try:
-            code = push(gather(), url=url, token=token)
-            log.info("pushed snapshot -> %s", code)
-            if a.once:
-                print(f"pushed -> HTTP {code}")
+            if gw is None:
+                from mt5.gateway import MT5Gateway
+                gw = MT5Gateway()
+                if not gw.connect():
+                    gw = None
+            if gw is not None:
+                push(ticks(gw), url=url, token=token, path="/api/tick", timeout=8.0)
         except Exception as e:
-            log.warning("push failed: %s", e)
-            if a.once:
-                print(f"push failed: {e}")
-        if a.once:
-            return 0
-        time.sleep(max(15, PUSH_SECONDS))
+            log.debug("tick push failed: %s", e)
+            gw = None
+        time.sleep(max(1.0, TICK_SECONDS))
+
+
+def ticks(gw) -> dict:
+    """Latest bid/ask per symbol (small, sent every few seconds for the live chart)."""
+    out = {"time": time.time(), "symbols": {}}
+    for s in TICK_SYMBOLS:
+        t = gw.get_tick(s)
+        if t and t.get("bid"):
+            out["symbols"][s] = {"bid": t["bid"], "ask": t["ask"], "time_utc": t.get("time_utc"),
+                                 "age_s": t.get("age_seconds")}
+    return out
 
 
 if __name__ == "__main__":

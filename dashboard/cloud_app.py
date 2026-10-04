@@ -4,6 +4,8 @@ Cloud dashboard server (runs on the Oracle Cloud VM).  Python stdlib only.
   POST /api/push    snapshot from the trading PC      (Authorization: Bearer DASHBOARD_PUSH_TOKEN)
   GET  /            the dashboard page                 (HTTP Basic auth: DASHBOARD_USER / DASHBOARD_PASSWORD)
   GET  /api/state   latest snapshot + equity history   (Basic auth)
+  POST /api/tick    live bid/ask every few seconds       (Bearer token)
+  GET  /api/tick    latest live prices                  (Basic auth)
   GET  /healthz     liveness                            (no auth, no data)
 
 Binds 127.0.0.1:8080 by default; Caddy in front provides HTTPS (deploy/dashboard_setup.sh).
@@ -28,6 +30,7 @@ DATA = Path(os.getenv("DASHBOARD_DATA_DIR", HERE.parent / "data" / "dashboard"))
 LATEST = DATA / "latest.json"
 HISTORY = DATA / "equity_history.json"
 MAX_BODY = 8 * 1024 * 1024
+_TICK: dict = {}                                  # latest live prices (memory only)
 MAX_POINTS = 50_000
 
 
@@ -117,12 +120,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ("/", "/index.html"):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path.startswith("/api/tick"):
+            return self._send(200, json.dumps(_TICK or {"symbols": {}}).encode())
         if self.path.startswith("/api/state"):
             return self._send(200, json.dumps(state(), default=str).encode())
         self._send(404, b'{"error":"not found"}')
 
     def do_POST(self):
-        if self.path != "/api/push":
+        if self.path not in ("/api/push", "/api/tick"):
             return self._send(404, b'{"error":"not found"}')
         token, _, _ = _cfg()
         if not bearer_ok(self.headers.get("Authorization"), token):
@@ -135,7 +140,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.headers.get("Content-Encoding") == "gzip":
                 raw = gzip.decompress(raw)
-            store(json.loads(raw))
+            data = json.loads(raw)
+            if self.path == "/api/tick":
+                data["received"] = time.time()
+                _TICK.clear()
+                _TICK.update(data)
+            else:
+                store(data)
         except Exception:
             return self._send(400, b'{"error":"bad snapshot"}')
         self._send(200, b'{"ok":true}')

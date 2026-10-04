@@ -129,9 +129,13 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                     df["time"] = pd.to_datetime(df["time"], utc=True)
                     done = df[df["time"] < pd.Timestamp(now).floor("1h")].reset_index(drop=True)
                     tick = gw.get_tick(s) or {}
+                    m1 = gw.get_rates(s, "M1", 240)
                     out["symbols"][s] = {
                         "candles": [{"time": int(r.time.timestamp()), "open": r.open, "high": r.high, "low": r.low,
                                      "close": r.close} for r in df.itertuples()],
+                        "candles_m1": [] if m1 is None or m1.empty else [
+                            {"time": int(pd.Timestamp(r.time).timestamp()), "open": r.open, "high": r.high,
+                             "low": r.low, "close": r.close} for r in m1.itertuples()],
                         "readiness": signal_readiness(done) if len(done) > 120 else {"error": "not enough bars"},
                         "bid": tick.get("bid"), "ask": tick.get("ask"), "spread": tick.get("spread"),
                         "tick_age_s": tick.get("age_seconds")}

@@ -92,3 +92,20 @@ def test_rules_news_window_and_position_caps():
     st = _rules(trades=trades, news_events=[{"time_utc": "2026-10-07T18:00:00+00:00", "event": "FOMC"}])
     assert st["Max open positions"] == "fail" and st["Positions per market group"] == "fail"
     assert st["No trades ±5 min of high-impact news (funded: profit not counted)"] == "warn"
+
+
+def test_tick_endpoint_roundtrip(tmp_path, monkeypatch):
+    import gzip, threading, urllib.request
+    from http.server import ThreadingHTTPServer
+    monkeypatch.setenv("DASHBOARD_PUSH_TOKEN", "tok"); monkeypatch.setenv("DASHBOARD_USER", "u"); monkeypatch.setenv("DASHBOARD_PASSWORD", "p")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ca.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}"
+    body = gzip.compress(json.dumps({"symbols": {"BTCUSD.vx": {"bid": 85000.5, "ask": 85030, "time_utc": "2026-10-05T10:00:01+00:00"}}}).encode())
+    req = urllib.request.Request(url + "/api/tick", data=body, method="POST",
+                                 headers={"Authorization": "Bearer tok", "Content-Encoding": "gzip"})
+    assert urllib.request.urlopen(req).status == 200
+    got = json.load(urllib.request.urlopen(urllib.request.Request(
+        url + "/api/tick", headers={"Authorization": "Basic " + base64.b64encode(b"u:p").decode()})))
+    assert got["symbols"]["BTCUSD.vx"]["bid"] == 85000.5 and got["received"] > 0
+    srv.shutdown()

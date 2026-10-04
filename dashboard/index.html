@@ -83,8 +83,11 @@ button.theme { margin-left: auto; }
 
   <section class="grid g2" style="margin-top:12px">
     <div class="card">
-      <h2>Price · H1</h2>
-      <div class="tabs" role="tablist" id="tabs"></div>
+      <h2>Price <span class="small muted" id="liveTag" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between">
+        <div class="tabs" role="tablist" id="tabs"></div>
+        <div class="tabs" role="tablist" id="tfs"></div>
+      </div>
       <div id="chart" aria-label="Candlestick chart with trades"></div>
       <div class="small muted" style="margin-top:6px">
         ▲ buy / ▼ sell entries, ● exits · <span class="legend-line"></span>open SL / TP ·
@@ -126,6 +129,8 @@ const chip = (level, text) => { const [v, icon] = STATUS[level];
   return el("span", {class: "chip"}, el("span", {class: "dot", style: `background:var(${v})`}), `${icon} ${text}`); };
 
 let S = null, sym = null, chart, candles, eqChart, eqSeries, priceLines = [];
+let tf = "M1", lastBar = null, liveLine = null, lastTick = 0;
+const TF_SEC = { M1: 60, H1: 3600 };
 
 function theme() {
   const t = document.documentElement.getAttribute("data-theme");
@@ -228,11 +233,23 @@ function renderTabs() {
     b.onclick = () => { sym = s; render(); }; t.append(b); }
 }
 
+function renderTfs() {
+  const t = $("tfs"); t.innerHTML = "";
+  for (const k of ["M1", "H1"]) { const b = el("button", {class: "tab", role: "tab", "aria-selected": String(k === tf), type: "button"},
+    k === "M1" ? "M1 · live" : "H1 · strategy");
+    b.onclick = () => { tf = k; render(); }; t.append(b); }
+}
+
 function renderChart() {
   const d = ((S.market || {}).symbols || {})[sym]; if (!d || !d.candles) return;
-  candles.setData(d.candles);
+  const data = tf === "M1" && (d.candles_m1 || []).length ? d.candles_m1 : d.candles;
+  candles.setData(data);
+  lastBar = data.length ? { ...data[data.length - 1] } : null;
+  if (liveLine) { candles.removePriceLine(liveLine); liveLine = null; }
+  lastTick = 0;
   for (const pl of priceLines) candles.removePriceLine(pl); priceLines = [];
-  const hour = (iso) => Math.floor(Date.parse(iso) / 3600000) * 3600;
+  const step = TF_SEC[tf] || 3600;
+  const hour = (iso) => Math.floor(Date.parse(iso) / 1000 / step) * step;
   const marks = [];
   for (const t of (S.trades || []).filter((t) => t.symbol === sym)) {
     const buy = t.direction === "BUY";
@@ -310,13 +327,34 @@ function renderEquity() {
 function render() {
   if (!S) return;
   if (S.error) { $("updated").textContent = S.error; return; }
-  renderHeader(); renderTiles(); renderRules(); renderTabs(); renderChart(); renderNext(); renderEquity(); renderTables();
+  renderHeader(); renderTiles(); renderRules(); renderTabs(); renderTfs(); renderChart(); renderNext(); renderEquity(); renderTables();
 }
 async function load() {
   try { const r = await fetch("/api/state", {cache: "no-store"}); S = await r.json(); render(); }
   catch (e) { $("updated").textContent = "cannot reach dashboard server"; }
 }
-buildCharts(); load(); setInterval(load, 30000);
+// ---- live prices: every 2 s update the forming candle and the live price line ----
+async function loadTick() {
+  if (!S || !sym || !candles) return;
+  try {
+    const r = await fetch("/api/tick", {cache: "no-store"}); const T = await r.json();
+    const q = (T.symbols || {})[sym];
+    const ageS = T.received ? Date.now() / 1000 - T.received : null;
+    $("liveTag").textContent = q ? `${sym.replace(".vx", "")} ${fmt(q.bid, q.bid > 100 ? 2 : 5)} · ${ageS !== null && ageS < 15 ? "live" : "prices " + fmt(ageS / 60, 0) + " min old"}` : "no live prices (publisher not running)";
+    if (!q || !q.time_utc || !lastBar) return;
+    const t = Date.parse(q.time_utc) / 1000; if (t <= lastTick) return; lastTick = t;
+    const step = TF_SEC[tf] || 3600, bucket = Math.floor(t / step) * step, px = q.bid;
+    if (bucket === lastBar.time) {
+      lastBar.high = Math.max(lastBar.high, px); lastBar.low = Math.min(lastBar.low, px); lastBar.close = px;
+    } else if (bucket > lastBar.time) {
+      lastBar = { time: bucket, open: lastBar.close, high: Math.max(lastBar.close, px), low: Math.min(lastBar.close, px), close: px };
+    } else return;
+    candles.update(lastBar);
+    if (!liveLine) liveLine = candles.createPriceLine({ price: px, title: "live", color: css("--series-1"), lineWidth: 1, lineStyle: 0, axisLabelVisible: true });
+    else liveLine.applyOptions({ price: px });
+  } catch (e) { /* keep last view */ }
+}
+buildCharts(); load(); setInterval(load, 30000); setInterval(loadTick, 2000);
 </script>
 </body>
 </html>
