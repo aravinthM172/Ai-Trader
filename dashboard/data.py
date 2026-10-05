@@ -289,6 +289,33 @@ def _week_news() -> list[dict]:
         return []
 
 
+def symbol_strength(trades: list[dict], top: int = 12) -> list[dict]:
+    """Backtest scan ranking (reports/multi_symbol_scan.json) joined with each symbol's live record."""
+    rep = _json(R / "multi_symbol_scan.json") or {}
+    live: dict[str, dict] = {}
+    for t in trades:
+        if t.get("status") != "CLOSED" or t.get("pnl_usd") is None:
+            continue
+        s = live.setdefault(t["symbol"], {"trades": 0, "wins": 0, "net_usd": 0.0, "sum_R": 0.0})
+        s["trades"] += 1
+        s["wins"] += t["pnl_usd"] > 0
+        s["net_usd"] += t["pnl_usd"]
+        s["sum_R"] += t.get("r_multiple") or 0.0
+    rows = []
+    for sym, r in (rep.get("results") or {}).items():
+        if r.get("expectancy_R") is None:
+            continue
+        lv = live.get(sym, {})
+        rows.append({"symbol": sym, "group": r.get("group"), "years": r.get("years"),
+                     "trades_per_month": r.get("trades_per_month"), "expectancy_R": r.get("expectancy_R"),
+                     "profit_factor": r.get("profit_factor"), "wf_positive": r.get("wf_positive"),
+                     "passes": bool(r.get("passes")), "live_trades": lv.get("trades", 0),
+                     "live_wins": lv.get("wins", 0), "live_net_usd": round(lv.get("net_usd", 0.0), 2),
+                     "live_avg_R": round(lv["sum_R"] / lv["trades"], 3) if lv.get("trades") else None})
+    rows.sort(key=lambda x: (not x["passes"], -x["expectancy_R"]))
+    return rows[:top]
+
+
 def gather() -> dict:
     now = datetime.now(timezone.utc)
     ms, bs = _json(FILES["multi_status"]), _json(FILES["btc_status"])
@@ -336,4 +363,5 @@ def gather() -> dict:
         "news": news,
         "edge": edge,
         "alerts": alerts,
+        "strength": symbol_strength(trades),
     }

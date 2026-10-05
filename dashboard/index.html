@@ -53,8 +53,22 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: v
 .tab { border: 1px solid var(--border); background: var(--surface); color: var(--text-primary);
   padding: 5px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
 .tab[aria-selected="true"] { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
-#chart { height: 420px; } #equity { height: 220px; }
-@media (max-width: 600px) { #chart { height: 320px; } }
+#equity { height: 220px; }
+.charts { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+@media (max-width: 600px) { .charts { grid-template-columns: 1fr; } }
+.symchart { height: 300px; }
+.symcard.sel { border-color: var(--series-1); box-shadow: inset 0 0 0 1px var(--series-1); }
+.symhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+.symhead strong { font-size: 15px; } .symhead .px { font-variant-numeric: tabular-nums; margin-left: auto; }
+details.card > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸"; color: var(--text-muted); }
+details.card[open] > summary::before { content: "▾"; }
+details.card > summary h2 { margin: 0; } details.card[open] > summary { margin-bottom: 10px; }
+.hit { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 12px; border: 1px solid; }
+.hit-tp { color: var(--good); border-color: var(--good); } .hit-sl { color: var(--critical); border-color: var(--critical); }
+.hit-other { color: var(--serious); border-color: var(--serious); } .hit-open { color: var(--text-secondary); border-color: var(--border); }
+td.num, th.num { text-align: right; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--text-secondary); font-weight: 500; }
@@ -92,44 +106,54 @@ button.theme { margin-left: auto; }
 
   <section class="grid g4" id="tiles" aria-label="Account and challenge"></section>
 
-  <section class="card" style="margin-top:12px" aria-label="Rules">
-    <h2>Rules <span class="small muted" id="rulesSummary" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
-    <div class="grid g2" id="rules"></div>
+  <section class="card" style="margin-top:12px" aria-label="Open positions">
+    <h2>Open positions <span class="small muted" id="posNote" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+    <div class="scroll" id="positions"></div>
   </section>
 
-  <section class="grid g2" style="margin-top:12px">
-    <div class="card">
-      <h2>Price <span class="small muted" id="liveTag" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
-      <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between">
-        <div class="tabs" role="tablist" id="tabs"></div>
-        <div class="tabs" role="tablist" id="tfs"></div>
-      </div>
-      <div id="chart" aria-label="Candlestick chart with trades"></div>
-      <div class="small muted" style="margin-top:6px">
-        ▲ buy / ▼ sell entries, ● exits · <span class="legend-line"></span>open SL / TP ·
-        <span class="legend-line" style="border-top-style:dotted"></span>next-trade plan (if the signal fires)
-      </div>
+  <section class="card" style="margin-top:12px" aria-label="Charts">
+    <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <h2 style="margin:0">Symbols we trade <span class="small muted" id="liveTag" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+      <div class="tabs" role="tablist" id="tfs" style="margin:0"></div>
     </div>
-    <div class="card" id="nextCard">
-      <h2>Next trade</h2>
-      <div id="next"></div>
+    <div class="grid charts" id="charts"></div>
+    <div class="small muted" style="margin-top:8px">
+      ▲ buy / ▼ sell entries, ● exits (TP / SL / closed) · <span class="legend-line"></span>open SL / TP ·
+      <span class="legend-line" style="border-top-style:dotted"></span>next-trade plan · click a chart to see its next-trade checklist
     </div>
   </section>
 
   <section class="grid g2" style="margin-top:12px">
+    <div class="card" id="nextCard"><h2>Next trade</h2><div id="next"></div></div>
     <div class="card"><h2>Realised balance</h2><div id="equity" aria-label="Balance over time"></div>
       <div class="small muted" id="eqNote"></div></div>
-    <div class="card"><h2>Open positions</h2><div class="scroll" id="positions"></div></div>
+  </section>
+
+  <section class="card" style="margin-top:12px" aria-label="Trades">
+    <h2>Trades <span class="small muted" id="tradesSummary" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+    <div class="scroll" id="trades"></div>
   </section>
 
   <section class="grid g2" style="margin-top:12px">
-    <div class="card"><h2>Trades</h2><div class="scroll" id="trades"></div></div>
-    <div class="grid">
-      <div class="card"><h2>News blackouts (72 h)</h2><div id="news"></div></div>
-      <div class="card"><h2>Live vs backtest</h2><div id="edge"></div></div>
-      <div class="card"><h2>Latest alerts</h2><div id="alerts"></div></div>
-    </div>
+    <div class="card"><h2>News blackouts (72 h)</h2><div id="news"></div></div>
+    <div class="card"><h2>Live vs backtest</h2><div id="edge"></div></div>
   </section>
+
+  <details class="card" style="margin-top:12px" id="strengthBox">
+    <summary><h2>Strong symbols</h2><span class="small muted" id="strengthSummary"></span></summary>
+    <div class="scroll" id="strength"></div>
+    <div class="small muted" style="margin-top:6px">Backtest = same strategy on years of broker history with real spread and swap. Only symbols marked "approved" may trade.</div>
+  </details>
+
+  <details class="card" style="margin-top:12px" id="rulesBox">
+    <summary><h2>Rules</h2><span class="small muted" id="rulesSummary"></span></summary>
+    <div class="grid g2" id="rules"></div>
+  </details>
+
+  <details class="card" style="margin-top:12px" id="alertsBox">
+    <summary><h2>Latest alerts</h2><span class="small muted" id="alertsSummary"></span></summary>
+    <div id="alerts"></div>
+  </details>
 </main>
 
 <script>
@@ -144,7 +168,8 @@ const STATUS = { good: ["--good", "✓"], warning: ["--warning", "!"], serious: 
 const chip = (level, text) => { const [v, icon] = STATUS[level];
   return el("span", {class: "chip"}, el("span", {class: "dot", style: `background:var(${v})`}), `${icon} ${text}`); };
 
-let S = null, sym = null, chart, candles, eqChart, eqSeries, priceLines = [];
+let S = null, sym = null, eqChart, eqSeries, chartSyms = "";
+const C = {};   // per-symbol chart state: { chart, candles, lines, lastBar, liveLine, lastTick, card }
 // profit / loss with colour + sign + arrow (never colour alone)
 function plText(v) { if (v === null || v === undefined || isNaN(v)) return "–"; const n = Number(v);
   return (n > 0 ? "▲ +" : n < 0 ? "▼ −" : "") + "$" + fmt(Math.abs(n)); }
@@ -154,7 +179,7 @@ function rSpan(v) { if (v === null || v === undefined) return "–"; const n = N
   return plSpan(n, (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n), 2) + " R"); }
 function setPL(id, v) { const e = $(id); if (!e) return; const n = Number(v);
   e.textContent = plText(v); e.className = "value " + (n > 0 ? "pl-pos" : n < 0 ? "pl-neg" : "pl-flat"); }
-let tf = "M1", lastBar = null, liveLine = null, lastTick = 0;
+let tf = "M1";
 const TF_SEC = { M1: 60, H1: 3600 };
 
 function theme() {
@@ -174,15 +199,34 @@ function chartOpts(h) {
     crosshair: { mode: 0 } };
 }
 function buildCharts() {
-  $("chart").innerHTML = ""; $("equity").innerHTML = ""; priceLines = [];
-  chart = LightweightCharts.createChart($("chart"), chartOpts($("chart").clientHeight));
-  candles = chart.addCandlestickSeries({ upColor: css("--up"), downColor: css("--down"), borderVisible: false,
-    wickUpColor: css("--up"), wickDownColor: css("--down") });
+  $("equity").innerHTML = ""; $("charts").innerHTML = ""; chartSyms = "";
+  for (const k of Object.keys(C)) delete C[k];
   eqChart = LightweightCharts.createChart($("equity"), chartOpts($("equity").clientHeight));
   eqSeries = eqChart.addLineSeries({ color: css("--series-1"), lineWidth: 2 });
-  new ResizeObserver(() => { chart.applyOptions({ width: $("chart").clientWidth }); eqChart.applyOptions({ width: $("equity").clientWidth }); })
-    .observe($("chart"));
+  new ResizeObserver(() => eqChart.applyOptions({ width: $("equity").clientWidth })).observe($("equity"));
 }
+const dec = (v) => (Math.abs(v) > 100 ? 2 : 5);
+const short = (s) => (s || "").replace(".vx", "");
+// one chart card per traded symbol, laid out in columns (rebuilt only when the symbol list changes)
+function ensureSymCharts(syms) {
+  if (syms.join() === chartSyms) return;
+  chartSyms = syms.join(); $("charts").innerHTML = "";
+  for (const k of Object.keys(C)) delete C[k];
+  for (const s of syms) {
+    const box = el("div", {class: "symchart", "aria-label": `${short(s)} candlestick chart with trades`});
+    const card = el("div", {class: "card symcard", role: "button", tabindex: "0"},
+      el("div", {class: "symhead"}, el("strong", {}, short(s)), el("span", {id: `sig-${s}`}), el("span", {class: "px small", id: `px-${s}`})), box);
+    card.onclick = () => { sym = s; markSelected(); renderNext(); };
+    card.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); card.click(); } };
+    $("charts").append(card);
+    const chart = LightweightCharts.createChart(box, chartOpts(box.clientHeight || 300));
+    const candles = chart.addCandlestickSeries({ upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+      wickUpColor: css("--up"), wickDownColor: css("--down") });
+    new ResizeObserver(() => chart.applyOptions({ width: box.clientWidth })).observe(box);
+    C[s] = { chart, candles, lines: [], lastBar: null, liveLine: null, lastTick: 0, card };
+  }
+}
+function markSelected() { for (const [s, c] of Object.entries(C)) c.card.classList.toggle("sel", s === sym); }
 
 function renderHeader() {
   const c = $("chips"); c.innerHTML = "";
@@ -278,14 +322,6 @@ function liveChallenge(eq) {
   if ($("chTotalBar")) $("chTotalBar").style.width = Math.max(0, Math.min(100, 100 * roomTotal / (base * 0.10))) + "%";
 }
 
-function renderTabs() {
-  const syms = Object.keys((S.market || {}).symbols || {});
-  if (!sym || !syms.includes(sym)) sym = syms[0];
-  const t = $("tabs"); t.innerHTML = "";
-  for (const s of syms) { const b = el("button", {class: "tab", role: "tab", "aria-selected": String(s === sym), type: "button"}, s.replace(".vx", ""));
-    b.onclick = () => { sym = s; render(); }; t.append(b); }
-}
-
 function renderTfs() {
   const t = $("tfs"); t.innerHTML = "";
   for (const k of ["M1", "H1"]) { const b = el("button", {class: "tab", role: "tab", "aria-selected": String(k === tf), type: "button"},
@@ -293,41 +329,59 @@ function renderTfs() {
     b.onclick = () => { tf = k; render(); }; t.append(b); }
 }
 
-function renderChart() {
-  const d = ((S.market || {}).symbols || {})[sym]; if (!d || !d.candles) return;
-  const data = tf === "M1" && (d.candles_m1 || []).length ? d.candles_m1 : d.candles;
-  candles.setData(data);
-  lastBar = data.length ? { ...data[data.length - 1] } : null;
-  if (liveLine) { candles.removePriceLine(liveLine); liveLine = null; }
-  lastTick = 0;
-  for (const pl of priceLines) candles.removePriceLine(pl); priceLines = [];
-  const step = TF_SEC[tf] || 3600;
-  const hour = (iso) => Math.floor(Date.parse(iso) / 1000 / step) * step;
-  const marks = [];
-  for (const t of (S.trades || []).filter((t) => t.symbol === sym)) {
-    const buy = t.direction === "BUY";
-    marks.push({ time: hour(t.opened_utc), position: buy ? "belowBar" : "aboveBar", color: buy ? css("--up") : css("--down"),
-      shape: buy ? "arrowUp" : "arrowDown", text: `${t.direction} ${t.volume}` });
-    if (t.closed_utc) marks.push({ time: hour(t.closed_utc), position: buy ? "aboveBar" : "belowBar", color: css("--text-muted"),
-      shape: "circle", text: `${t.exit_reason || "exit"} ${t.r_multiple != null ? fmt(t.r_multiple, 2) + "R" : ""}` });
+function exitLabel(t) {
+  if (!t.closed_utc) return "open";
+  return t.exit_reason === "target" ? "TP hit" : t.exit_reason === "stop" ? "SL hit" : "closed";
+}
+function renderCharts() {
+  const all = (S.market || {}).symbols || {}, syms = Object.keys(all);
+  if (!sym || !syms.includes(sym)) sym = syms[0];
+  ensureSymCharts(syms); markSelected();
+  const openAll = ((S.multi || {}).status || {}).open_positions || [];
+  for (const s of syms) {
+    const d = all[s], c = C[s]; if (!c) continue;
+    const r = (d && d.readiness) || {};
+    const sig = $(`sig-${s}`);
+    if (sig) sig.replaceChildren(d && d.error ? chip("critical", d.error) : r.decision && r.decision !== "HOLD" ? chip("good", `${r.decision} signal`)
+      : el("span", {class: "small muted"}, r.closest_side ? `no signal · ${r.met}/3 for ${r.closest_side}` : ""));
+    if (!d || !d.candles) continue;
+    const data = tf === "M1" && (d.candles_m1 || []).length ? d.candles_m1 : d.candles;
+    c.candles.setData(data);
+    c.lastBar = data.length ? { ...data[data.length - 1] } : null;
+    if (c.liveLine) { c.candles.removePriceLine(c.liveLine); c.liveLine = null; }
+    c.lastTick = 0;
+    for (const pl of c.lines) c.candles.removePriceLine(pl); c.lines = [];
+    const step = TF_SEC[tf] || 3600;
+    const bucket = (iso) => Math.floor(Date.parse(iso) / 1000 / step) * step;
+    const marks = [];
+    for (const t of (S.trades || []).filter((t) => t.symbol === s)) {
+      const buy = t.direction === "BUY";
+      marks.push({ time: bucket(t.opened_utc), position: buy ? "belowBar" : "aboveBar", color: buy ? css("--up") : css("--down"),
+        shape: buy ? "arrowUp" : "arrowDown", text: `${t.direction} ${t.volume}` });
+      if (t.closed_utc) {
+        const lab = exitLabel(t);
+        marks.push({ time: bucket(t.closed_utc), position: buy ? "aboveBar" : "belowBar",
+          color: lab === "TP hit" ? css("--good") : lab === "SL hit" ? css("--critical") : css("--serious"),
+          shape: "circle", text: `${lab} ${t.r_multiple != null ? fmt(t.r_multiple, 2) + "R" : ""}` });
+      }
+    }
+    marks.sort((a, b) => a.time - b.time); c.candles.setMarkers(marks);
+    const line = (price, title, style, color) => c.lines.push(c.candles.createPriceLine({ price, title,
+      color: color || css("--text-secondary"), lineWidth: 1, lineStyle: style, axisLabelVisible: true }));
+    const pos = openAll.filter((p) => p.symbol === s);
+    for (const p of pos) { line(p.price_open, `${p.type} entry`, 0); if (p.sl) line(p.sl, "SL", 2, css("--critical")); if (p.tp) line(p.tp, "TP", 2, css("--good")); }
+    if (!pos.length && r.plan) { line(r.plan.entry, `next ${r.plan.side}?`, 1); line(r.plan.sl, "plan SL", 1); line(r.plan.tp, "plan TP", 1); }
+    // keep SL / TP / plan lines on screen: widen the auto-scale to include them
+    const extra = c.lines.map((pl) => pl.options().price).filter((v) => isFinite(v));
+    c.candles.applyOptions({ autoscaleInfoProvider: (orig) => {
+      const res = orig(); if (!res || !extra.length) return res;
+      return { ...res, priceRange: { minValue: Math.min(res.priceRange.minValue, ...extra), maxValue: Math.max(res.priceRange.maxValue, ...extra) } };
+    } });
   }
-  marks.sort((a, b) => a.time - b.time); candles.setMarkers(marks);
-  const line = (price, title, style) => priceLines.push(candles.createPriceLine({ price, title, color: css("--text-secondary"),
-    lineWidth: 1, lineStyle: style, axisLabelVisible: true }));
-  const pos = (((S.multi || {}).status || {}).open_positions || []).filter((p) => p.symbol === sym);
-  for (const p of pos) { line(p.price_open, `${p.type} entry`, 0); if (p.sl) line(p.sl, "SL", 2); if (p.tp) line(p.tp, "TP", 2); }
-  const r = d.readiness || {};
-  if (!pos.length && r.plan) { line(r.plan.entry, `next ${r.plan.side}?`, 1); line(r.plan.sl, "plan SL", 1); line(r.plan.tp, "plan TP", 1); }
-  // keep SL / TP / plan lines on screen: widen the auto-scale to include them
-  const extra = priceLines.map((pl) => pl.options().price).filter((v) => isFinite(v));
-  candles.applyOptions({ autoscaleInfoProvider: (orig) => {
-    const res = orig(); if (!res || !extra.length) return res;
-    return { ...res, priceRange: { minValue: Math.min(res.priceRange.minValue, ...extra), maxValue: Math.max(res.priceRange.maxValue, ...extra) } };
-  } });
 }
 
 function renderNext() {
-  const N = $("next"); N.innerHTML = "";
+  const N = $("next"); N.innerHTML = ""; if (!sym) return;
   const d = ((S.market || {}).symbols || {})[sym] || {}, r = d.readiness || {};
   if (r.error || d.error) { N.append(el("div", {class: "muted"}, r.error || d.error)); return; }
   const fired = r.decision !== "HOLD";
@@ -352,18 +406,52 @@ function renderNext() {
 
 function table(rows, cols) {
   if (!rows.length) return el("div", {class: "muted"}, "none");
-  const t = el("table"), h = el("tr"); cols.forEach(([, label]) => h.append(el("th", {}, label))); t.append(h);
-  for (const r of rows) { const tr = el("tr"); cols.forEach(([k, , f]) => tr.append(el("td", {}, f ? f(r[k], r) : (r[k] ?? "–")))); t.append(tr); }
+  const t = el("table"), h = el("tr"); cols.forEach(([, label, , num]) => h.append(el("th", num ? {class: "num"} : {}, label))); t.append(h);
+  for (const r of rows) { const tr = el("tr"); cols.forEach(([k, , f, num]) => tr.append(el("td", num ? {class: "num"} : {}, f ? f(r[k], r) : (r[k] ?? "–")))); t.append(tr); }
   return t;
+}
+const px = (v) => (v === null || v === undefined || !Number(v)) ? "–" : fmt(v, dec(v));
+// open positions: current price and how far each one is from its SL and TP (live quotes when available)
+function positionsTable(pos, quotes) {
+  const rows = pos.map((p) => {
+    const q = (quotes || {})[p.symbol] || {}, buy = p.type === "BUY";
+    const now = buy ? q.bid : q.ask;                     // the price the position would close at
+    const toSL = now && p.sl ? Math.abs(now - p.sl) : null, toTP = now && p.tp ? Math.abs(p.tp - now) : null;
+    const span = p.sl && p.tp ? Math.abs(p.tp - p.sl) : null;
+    const prog = span && now ? 100 * (buy ? now - p.sl : p.sl - now) / span : null;   // 0 % = at SL, 100 % = at TP
+    return { ...p, now, toSL, toTP, prog };
+  });
+  return table(rows, [["symbol", "Symbol", short], ["type", "Side"], ["volume", "Lots", null, 1], ["price_open", "Entry", px, 1],
+    ["now", "Now", px, 1],
+    ["sl", "Stop loss", (v, r) => el("span", {class: "pl-neg"}, `${px(v)}${r.toSL != null ? "  (" + fmt(r.toSL, dec(r.toSL)) + " away)" : ""}`), 1],
+    ["tp", "Take profit", (v, r) => el("span", {class: "pl-pos"}, `${px(v)}${r.toTP != null ? "  (" + fmt(r.toTP, dec(r.toTP)) + " away)" : ""}`), 1],
+    ["prog", "SL ◂ ▸ TP", (v) => v == null ? "–" : el("div", {class: "bar", style: "width:110px;margin:0", title: `${fmt(v, 0)}% of the way from SL to TP`},
+      el("span", {style: `width:${Math.max(0, Math.min(100, v))}%`}))],
+    ["profit", "P/L", (v) => plSpan(v), 1]]);
+}
+function resultChip(t) {
+  const lab = exitLabel(t);
+  if (lab === "TP hit") return el("span", {class: "hit hit-tp"}, "✓ TP hit");
+  if (lab === "SL hit") return el("span", {class: "hit hit-sl"}, "✕ SL hit");
+  if (lab === "open") return el("span", {class: "hit hit-open"}, "● open");
+  return el("span", {class: "hit hit-other", title: t.exit_reason || ""}, `◐ closed early (${t.exit_reason || "manual"})`);
 }
 function renderTables() {
   const pos = ((S.multi || {}).status || {}).open_positions || [];
-  $("positions").replaceChildren(table(pos, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
-    ["sl", "SL"], ["tp", "TP"], ["profit", "P/L", (v) => plSpan(v)]]));
-  const tr = [...(S.trades || [])].reverse().slice(0, 30);
-  $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? new Date(v).toLocaleString() : "–"], ["symbol", "Symbol"],
-    ["direction", "Side"], ["volume", "Lots"], ["entry", "Entry"], ["exit", "Exit"], ["exit_reason", "Exit"],
-    ["pnl_usd", "P/L", (v) => v === null || v === undefined ? "open" : plSpan(v)], ["r_multiple", "R", (v) => rSpan(v)]]));
+  const quotes = Object.fromEntries(Object.entries((S.market || {}).symbols || {}).map(([k, v]) => [k, { bid: v.bid, ask: v.ask }]));
+  $("positions").replaceChildren(positionsTable(pos, quotes));
+  $("posNote").textContent = pos.length ? "" : "no open trades";
+  const all = S.trades || [], closed = all.filter((t) => t.closed_utc);
+  const n = (l) => closed.filter((t) => exitLabel(t) === l).length;
+  const net = closed.reduce((a, t) => a + (Number(t.pnl_usd) || 0), 0);
+  $("tradesSummary").textContent = `${closed.length} closed · ${n("TP hit")} TP hit · ${n("SL hit")} SL hit · ${n("closed")} closed early · net ${plText(net)}`;
+  const tr = [...all].reverse().slice(0, 30);
+  $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? new Date(v).toLocaleString() : "–"],
+    ["closed_utc", "Closed", (v) => v ? new Date(v).toLocaleString() : "–"], ["symbol", "Symbol", short],
+    ["direction", "Side"], ["volume", "Lots", null, 1], ["entry", "Entry", px, 1],
+    ["sl", "Stop loss", (v) => el("span", {class: "pl-neg"}, px(v)), 1], ["tp", "Take profit", (v) => el("span", {class: "pl-pos"}, px(v)), 1],
+    ["exit", "Exit price", px, 1], ["exit_reason", "Result", (v, r) => resultChip(r)],
+    ["pnl_usd", "P/L", (v) => v === null || v === undefined ? "open" : plSpan(v), 1], ["r_multiple", "R", (v) => rSpan(v), 1]]));
   const news = S.news || [];
   $("news").replaceChildren(news.length ? el("ul", {class: "list"}, ...news.map((n) =>
     el("li", {}, `${new Date(n.time_utc).toLocaleString()} · ${n.currency} · ${n.event}`))) : el("div", {class: "muted"}, "no high-impact events"));
@@ -373,7 +461,17 @@ function renderTables() {
     el("div", {class: "small", style: "margin-top:6px"}, `${e.live_trades} live trades · mean ${fmt(e.live_mean_R, 3)} R · backtest ${fmt(e.reference_mean_R, 3)} R`),
     el("div", {class: "small muted"}, e.note || `stop if below ${fmt(e.sample_floor_R, 3)} R · losing streak ${e.live_worst_streak}/${e.streak_limit}`)));
   const al = S.alerts || [];
-  $("alerts").replaceChildren(al.length ? el("ul", {class: "list small"}, ...al.slice(0, 8).map((a) => el("li", {}, a))) : el("div", {class: "muted"}, "none"));
+  $("alertsSummary").textContent = al.length ? `${al.length} recent · latest: ${al[0].slice(0, 70)}` : "none";
+  $("alerts").replaceChildren(al.length ? el("ul", {class: "list small"}, ...al.slice(0, 15).map((a) => el("li", {}, a))) : el("div", {class: "muted"}, "none"));
+  const st = S.strength || [], ok = st.filter((r) => r.passes);
+  $("strengthSummary").textContent = ok.length ? `approved: ${ok.map((r) => short(r.symbol)).join(", ")}` : "no scan report";
+  $("strength").replaceChildren(table(st, [["symbol", "Symbol", short], ["group", "Group"],
+    ["passes", "Status", (v) => v ? chip("good", "approved") : chip("warning", "not approved")],
+    ["years", "Years tested", (v) => fmt(v, 1), 1], ["trades_per_month", "Trades / month", (v) => fmt(v, 1), 1],
+    ["expectancy_R", "Backtest avg R", (v) => rSpan(v), 1], ["profit_factor", "Profit factor", (v) => fmt(v, 2), 1],
+    ["wf_positive", "Positive periods", (v) => `${v}/8`, 1],
+    ["live_trades", "Live trades", (v, r) => v ? `${v} (${r.live_wins} won)` : "–", 1],
+    ["live_net_usd", "Live P/L", (v, r) => r.live_trades ? plSpan(v) : "–", 1], ["live_avg_R", "Live avg R", (v) => rSpan(v), 1]]));
 }
 
 function renderEquity() {
@@ -386,18 +484,19 @@ function renderEquity() {
 function render() {
   if (!S) return;
   if (S.error) { $("updated").textContent = S.error; return; }
-  renderHeader(); renderTiles(); renderRules(); renderTabs(); renderTfs(); renderChart(); renderNext(); renderEquity(); renderTables();
+  // each panel is independent: one failing must not stop the others
+  for (const f of [renderHeader, renderTiles, renderRules, renderTfs, renderCharts, renderNext, renderEquity, renderTables])
+    try { f(); } catch (e) { console.error(f.name, e); }
 }
 async function load() {
   try { const r = await fetch("/api/state", {cache: "no-store"}); S = await r.json(); render(); }
   catch (e) { $("updated").textContent = "cannot reach dashboard server"; }
 }
-// ---- live prices: every 2 s update the forming candle and the live price line ----
+// ---- live prices: every 2 s update every chart's forming candle, live line and the positions table ----
 async function loadTick() {
-  if (!S || !sym || !candles) return;
+  if (!S) return;
   try {
     const r = await fetch("/api/tick", {cache: "no-store"}); const T = await r.json();
-    const q = (T.symbols || {})[sym];
     const ageS = T.received ? Date.now() / 1000 - T.received : null;
     const fresh = ageS !== null && ageS < 15;
     if (T.account && fresh) liveChallenge(Number(T.account.equity));
@@ -407,21 +506,27 @@ async function loadTick() {
       setPL("liveOpenPL", T.account.floating);
       if ($("liveOpenPLSub")) $("liveOpenPLSub").textContent = `${T.account.open} open trade${T.account.open === 1 ? "" : "s"} · updates every 3 s`;
     }
-    if (T.positions && fresh)
-      $("positions").replaceChildren(table(T.positions, [["symbol", "Symbol"], ["type", "Side"], ["volume", "Lots"], ["price_open", "Entry"],
-        ["sl", "SL"], ["tp", "TP"], ["profit", "P/L (live)", (v) => plSpan(v)]]));
-    $("liveTag").textContent = q ? `${sym.replace(".vx", "")} ${fmt(q.bid, q.bid > 100 ? 2 : 5)} · ${ageS !== null && ageS < 15 ? "live" : "prices " + fmt(ageS / 60, 0) + " min old"}` : "no live prices (publisher not running)";
-    if (!q || !q.time_utc || !lastBar) return;
-    const t = Date.parse(q.time_utc) / 1000; if (t <= lastTick) return; lastTick = t;
-    const step = TF_SEC[tf] || 3600, bucket = Math.floor(t / step) * step, px = q.bid;
-    if (bucket === lastBar.time) {
-      lastBar.high = Math.max(lastBar.high, px); lastBar.low = Math.min(lastBar.low, px); lastBar.close = px;
-    } else if (bucket > lastBar.time) {
-      lastBar = { time: bucket, open: lastBar.close, high: Math.max(lastBar.close, px), low: Math.min(lastBar.close, px), close: px };
-    } else return;
-    candles.update(lastBar);
-    if (!liveLine) liveLine = candles.createPriceLine({ price: px, title: "live", color: css("--series-1"), lineWidth: 1, lineStyle: 0, axisLabelVisible: true });
-    else liveLine.applyOptions({ price: px });
+    if (T.positions && fresh) {
+      $("positions").replaceChildren(positionsTable(T.positions, T.symbols));
+      $("posNote").textContent = T.positions.length ? "live · updates every 3 s" : "no open trades";
+    }
+    $("liveTag").textContent = fresh ? "live prices" : ageS !== null ? `prices ${fmt(ageS / 60, 0)} min old` : "no live prices (publisher not running)";
+    const step = TF_SEC[tf] || 3600;
+    for (const [s, c] of Object.entries(C)) {
+      const q = (T.symbols || {})[s];
+      if ($(`px-${s}`)) $(`px-${s}`).textContent = q ? `${fmt(q.bid, dec(q.bid))}` : "";
+      if (!q || !q.time_utc || !c.lastBar) continue;
+      const t = Date.parse(q.time_utc) / 1000; if (t <= c.lastTick) continue; c.lastTick = t;
+      const bucket = Math.floor(t / step) * step, p = q.bid;
+      if (bucket === c.lastBar.time) {
+        c.lastBar.high = Math.max(c.lastBar.high, p); c.lastBar.low = Math.min(c.lastBar.low, p); c.lastBar.close = p;
+      } else if (bucket > c.lastBar.time) {
+        c.lastBar = { time: bucket, open: c.lastBar.close, high: Math.max(c.lastBar.close, p), low: Math.min(c.lastBar.close, p), close: p };
+      } else continue;
+      c.candles.update(c.lastBar);
+      if (!c.liveLine) c.liveLine = c.candles.createPriceLine({ price: p, title: "live", color: css("--series-1"), lineWidth: 1, lineStyle: 0, axisLabelVisible: true });
+      else c.liveLine.applyOptions({ price: p });
+    }
   } catch (e) { /* keep last view */ }
 }
 // ---- bot controls: command -> cloud -> trading PC (polls every 3 s) ----
@@ -456,6 +561,10 @@ async function pollCmd(n) {
       (j.status === "refused" ? " (press Start and type FORCE)" : "");
     if (j.status === "pending" && n < 70) setTimeout(() => pollCmd(n + 1), 2000); else load();
   } catch (e) { /* ignore */ }
+}
+for (const id of ["strengthBox", "rulesBox", "alertsBox"]) {
+  try { if (localStorage.getItem("open-" + id) === "1") $(id).open = true; } catch (e) {}
+  $(id).addEventListener("toggle", () => { try { localStorage.setItem("open-" + id, $(id).open ? "1" : "0"); } catch (e) {} });
 }
 buildCharts(); load(); setInterval(load, 30000); setInterval(loadTick, 2000);
 </script>
