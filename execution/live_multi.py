@@ -161,6 +161,25 @@ def size_volume(*, equity: float, risk_frac: float, max_risk_frac: float, sl_dis
     return round(vol, 8), vol * per_lot, "ok"
 
 
+VALUE_MISMATCH = 0.10      # tick value vs broker profit calculator: warn above 10 % apart
+
+
+def loss_value_per_unit(spec, calc_value: float | None, account_ccy: str) -> tuple[float | None, str]:
+    """$ lost per 1.0 adverse price move per lot, for sizing.  Uses the LARGER of the tick-value figure
+    and the broker's profit calculator, so a wrong tick value can never make a trade bigger (Valetax
+    DAX40.vx: tick value says $1 / point / lot, real ~$11.2).  When the calculator is unavailable and the
+    symbol pays profit in another currency, the tick value cannot be trusted -> None (skip the trade)."""
+    tick_v = spec.value_per_price_unit_per_lot
+    if calc_value and calc_value > 0:
+        v = max(tick_v, calc_value)
+        off = abs(calc_value - tick_v) / max(calc_value, tick_v)
+        return v, (f"tick value {tick_v:.4g} vs calculator {calc_value:.4g} per unit/lot -> using {v:.4g}"
+                   if off > VALUE_MISMATCH else "ok")
+    if spec.currency_profit and account_ccy and spec.currency_profit != account_ccy:
+        return None, f"cannot verify value per point ({spec.currency_profit} profit, calculator unavailable)"
+    return (tick_v, "ok") if tick_v > 0 else (None, "no tick value")
+
+
 def stop_plan(direction: str, price: float, atr: float, stops_level: float) -> tuple[float, float, float]:
     sl_d = max(SL_ATR * atr, stops_level * 1.15)
     tp_d = max(TP_ATR * atr, stops_level * 1.15)
@@ -421,8 +440,14 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         return {**out, "decision": "retry", "reason": f"spread {tick['spread']:.5g} > {MAX_SPREAD_ATR} x ATR {atr:.5g}"}
     px = tick["ask"] if sig.decision == "BUY" else tick["bid"]
     sl, tp, sl_d = stop_plan(sig.decision, px, atr, spec.stops_level_price)
+    vpu, vnote = loss_value_per_unit(spec, gw.calc_value_per_unit(s, sig.decision, px),
+                                     (gw.account_info() or {}).get("currency", "USD"))
+    if vpu is None:
+        return {**out, "decision": "skip", "reason": vnote, "final": True}
+    if vnote != "ok":
+        log.warning("%s sizing: %s", s, vnote)
     vol, risk_usd, note = size_volume(equity=equity, risk_frac=risk, max_risk_frac=MAX_RISK_PER_TRADE,
-                                      sl_dist=sl_d, value_per_unit=spec.value_per_price_unit_per_lot,
+                                      sl_dist=sl_d, value_per_unit=vpu,
                                       vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
     if vol <= 0:
         return {**out, "decision": "skip", "reason": note, "final": True}

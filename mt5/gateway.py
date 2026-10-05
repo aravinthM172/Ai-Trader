@@ -254,6 +254,19 @@ class MT5Gateway:
             currency_margin=field(i, "currency_margin", ""),
         )
 
+    def calc_value_per_unit(self, symbol: str, direction: str, price: float) -> Optional[float]:
+        """Account-currency loss of 1.0 lot over a 1.0 adverse price move, from the broker's own
+        profit calculator (order_calc_profit).  None when MT5 cannot compute it.  Independent of
+        trade_tick_value, which some brokers report wrongly (Valetax DAX40.vx: EUR contract, tick
+        value says $1/point/lot, real P/L is ~$11)."""
+        if not MT5_AVAILABLE or price <= 0:
+            return None
+        buy = direction == "BUY"
+        order_type = _mt5.ORDER_TYPE_BUY if buy else _mt5.ORDER_TYPE_SELL
+        exit_px = price - 1.0 if buy else price + 1.0
+        v = _mt5.order_calc_profit(order_type, symbol, 1.0, price, exit_px)
+        return abs(float(v)) if v else None
+
     def get_tick(self, symbol: str) -> Optional[dict]:
         if not MT5_AVAILABLE or not self.ensure_symbol(symbol):
             return None

@@ -160,3 +160,32 @@ def test_close_allowed_ignores_kill_switch_but_not_account_mode(monkeypatch):
     assert lm.close_allowed({"trade_mode": 2}) is False           # real account not allowed by LIVE_ACCOUNT_MODE
     monkeypatch.setenv("MULTI_LIVE_TRADING", "false")
     assert lm.close_allowed({"trade_mode": 0}) is False
+
+
+# -- sizing value per point: never trust a too-small tick value (DAX40.vx 2026-10-05) --------------
+class _Spec:
+    def __init__(self, vpu, ccy):
+        self.value_per_price_unit_per_lot, self.currency_profit = vpu, ccy
+
+
+def test_value_per_unit_uses_larger_of_tick_and_calculator():
+    v, note = lm.loss_value_per_unit(_Spec(1.0, "EUR"), 11.2, "USD")      # DAX: tick says $1, real ~$11.2
+    assert v == 11.2 and "calculator" in note
+    v, note = lm.loss_value_per_unit(_Spec(100.0, "USD"), 100.0, "USD")   # XAUUSD: both agree
+    assert v == 100.0 and note == "ok"
+    v, _ = lm.loss_value_per_unit(_Spec(12.0, "EUR"), 11.2, "USD")       # tick larger -> keep the larger
+    assert v == 12.0
+
+
+def test_value_per_unit_skips_unverifiable_foreign_currency():
+    v, note = lm.loss_value_per_unit(_Spec(1.0, "EUR"), None, "USD")
+    assert v is None and "cannot verify" in note
+    v, note = lm.loss_value_per_unit(_Spec(1.0, "USD"), None, "USD")     # same currency: tick value is fine
+    assert v == 1.0 and note == "ok"
+
+
+def test_dax_trade_sized_to_planned_risk():
+    vpu, _ = lm.loss_value_per_unit(_Spec(1.0, "EUR"), 11.2, "USD")
+    vol, risk, _ = lm.size_volume(equity=5000, risk_frac=0.005, max_risk_frac=0.02, sl_dist=129.5,
+                                  value_per_unit=vpu, vmin=0.01, vstep=0.01, vmax=50)
+    assert vol == 0.01 and risk <= 25          # was 0.19 lots (~$276 real risk) before the fix
