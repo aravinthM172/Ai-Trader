@@ -90,7 +90,17 @@ def signal_readiness(df: pd.DataFrame) -> dict:
         plan = {"side": side, "entry": close, "sl": close - d * SL_ATR * atr, "tp": close + d * TP_ATR * atr}
     return {"decision": decision, "closest_side": side, "conditions": conds, "met": sum(conds.values()),
             "missing": need, "rsi": round(rsi, 1), "momentum": mom, "ema": ema, "atr": atr, "close": close,
-            "signal_bar_utc": str(df["time"].iloc[-1]), "plan": plan}
+            "buy": buy, "sell": sell, "signal_bar_utc": str(df["time"].iloc[-1]), "plan": plan}
+
+
+def forming_preview(df_all: pd.DataFrame, now: datetime) -> dict | None:
+    """The same rule applied as if the still-forming H1 bar closed at the current price.
+    Display only: the bot decides on completed bars, so this can change before the hour ends."""
+    t = pd.to_datetime(df_all["time"], utc=True)
+    if not len(df_all) or t.iloc[-1] < pd.Timestamp(now).floor("1h"):
+        return None
+    r = signal_readiness(df_all)
+    return {k: r[k] for k in ("decision", "rsi", "momentum", "ema", "close", "buy", "sell")}
 
 
 def next_entry_window(now: datetime) -> dict:
@@ -137,6 +147,7 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                             {"time": int(pd.Timestamp(r.time).timestamp()), "open": r.open, "high": r.high,
                              "low": r.low, "close": r.close} for r in m1.itertuples()],
                         "readiness": signal_readiness(done) if len(done) > 120 else {"error": "not enough bars"},
+                        "forming": forming_preview(df, now) if len(done) > 120 else None,
                         "bid": tick.get("bid"), "ask": tick.get("ask"), "spread": tick.get("spread"),
                         "tick_age_s": tick.get("age_seconds")}
             finally:
