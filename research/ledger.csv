@@ -3,3 +3,9 @@ tested_utc,name,params,lookahead_ok,btc_exp_R,btc_wf,bitstamp_exp_R,bitstamp_t,x
 2026-10-04T15:50:00+00:00,consensus_2of3,{},True,0.2121,8,0.2737,12.16,0.1869,0.864,16,,True,False
 2026-10-04T15:50:00+00:00,momentum_vol_regime,{},True,0.1968,8,0.2704,12.8,0.1301,0.9,17,,True,False
 2026-10-04T15:50:00+00:00,momentum_no_shock,{},True,0.2032,8,0.2805,13.52,0.1184,0.961,18,,True,False
+2026-10-05T09:03:35+00:00,supertrend_flip,{},True,-0.0812,3,0.0501,1.16,0.1602,0.36,19,,False,False
+2026-10-05T09:03:35+00:00,donchian_supertrend,{},True,0.0772,7,0.1886,6.68,0.3805,0.682,20,,False,False
+2026-10-05T09:03:35+00:00,ema_cross_200,{},True,-0.0492,4,0.0721,1.65,0.0178,0.299,21,,False,False
+2026-10-05T09:03:35+00:00,macd_trend,{},True,-0.032,3,0.0568,1.38,-0.048,0.07,22,,False,False
+2026-10-05T09:03:35+00:00,squeeze_breakout,{},True,0.0141,5,0.1169,3.38,0.0516,0.432,23,,False,False
+2026-10-05T09:03:35+00:00,rsi2_pullback,{},True,-0.081,1,-0.0475,-1.73,-0.1351,0.144,24,,False,False
