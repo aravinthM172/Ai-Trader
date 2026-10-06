@@ -32,3 +32,9 @@ data/calendar_cache.json
 
 # dashboard publisher settings (push token)
 .env.dashboard
+
+# long-history research downloads (re-creatable: tools/fetch_dukascopy.py, backtest/strategy_round3_daily.py)
+data/dukascopy_raw/
+data/dukascopy_H1/
+data/mt5_D1/
+data/yahoo_D1/

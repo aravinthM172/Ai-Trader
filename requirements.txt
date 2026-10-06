@@ -8,3 +8,4 @@ anthropic
 pytest
 psutil
 mcp
+yfinance>=0.2  # research: long daily history (backtest/strategy_round3_daily.py)
