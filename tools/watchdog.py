@@ -70,13 +70,14 @@ EVENT_KINDS = {"closed": "TRADE CLOSED", "order_send": "ORDER SENT", "order_chec
 # -- process checks (psutil; injectable for tests) ---------------------------
 def btc_bot_watched() -> bool:
     """Watch/restart the BTC-only bot (execution/live.py) ONLY when it is the active bot.
-    Never when the multi-symbol trader already trades BTCUSD.vx on the same account --
-    running both would double the BTC exposure.  Override with WATCHDOG_WATCH_BTC=true/false."""
+    Never when the multi-symbol trader already trades BTCUSD (any broker suffix: BTCUSD.vx on
+    Valetax, BTCUSD on FundingPips) on the same account -- running both would double the BTC
+    exposure.  Override with WATCHDOG_WATCH_BTC=true/false."""
     v = os.getenv("WATCHDOG_WATCH_BTC", "auto").strip().lower()
     if v != "auto":
         return v in ("1", "true", "yes", "on")
     multi = [x.strip() for x in os.getenv("MULTI_SYMBOLS", "").split(",") if x.strip()]
-    return not (multi and "BTCUSD.vx" in multi)
+    return not any(m.upper().split(".")[0] == "BTCUSD" for m in multi)
 
 
 def processes() -> list[tuple[str, str]]:

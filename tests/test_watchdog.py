@@ -147,6 +147,8 @@ def test_btc_bot_never_restarted_when_multi_trades_btc(tmp_path, monkeypatch):
     _status(tmp_path / "s.json", age_min=600)                  # BTC-only bot long dead
     alerts, calls = _run(tmp_path, {}, procs=[MT5])
     assert calls["restart"] == 0 and not any("NOT UPDATING" in a for a in alerts)
+    monkeypatch.setenv("MULTI_SYMBOLS", "BTCUSD,XAUUSD,GER40")   # FundingPips names, no suffix
+    assert not wd.btc_bot_watched()
 
 
 def test_btc_bot_watched_when_it_is_the_active_bot(tmp_path, monkeypatch):
