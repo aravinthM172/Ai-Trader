@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from risk import prop_controls as pc
 
 NOW = datetime(2026, 10, 6, 10, 5, tzinfo=timezone.utc)
-CH = {"result": "in_progress", "phase": 1, "phase_start_balance": 5000.0, "day_ref": 5000.0}
+CH = {"result": "in_progress", "phase": 1, "phase_start_balance": 5000.0, "day_ref": 5000.0, "daily_loss_limit": 0.05}
 
 
 def _d(**kw):
@@ -59,3 +59,17 @@ def test_risk_shrinks_with_open_positions_and_daily_room():
 def test_idle_without_challenge():
     d = _d(challenge=None)
     assert d.allow_entries and "idle" in d.reasons[0]
+
+
+def test_three_percent_daily_limit_tightens_buffers():
+    ch3 = dict(CH, daily_loss_limit=0.03)
+    d = _d(challenge=ch3, equity=4890.0)                      # -2.2 % today: past the 2.1 % block
+    assert not d.allow_entries and not d.flatten_all
+    d = _d(challenge=ch3, equity=4870.0)                      # -2.6 % today: past the 2.55 % flatten
+    assert d.flatten_all and d.halt_today
+    assert _d(equity=4890.0).allow_entries                     # the same day is fine on a 5 % account
+
+
+def test_missing_daily_limit_assumes_the_stricter_three_percent():
+    ch = {k: v for k, v in CH.items() if k != "daily_loss_limit"}
+    assert _d(challenge=ch, equity=4870.0).flatten_all

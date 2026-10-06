@@ -8,8 +8,10 @@ So entries must stop well before the limits, and open positions must be closed b
 equity can reach them.  This module decides; the caller acts.
 
 Decision levels (fractions of the reference; defaults = 5 % daily / 10 % max firm rules):
-  daily:  equity loss >= DAILY_BLOCK  (default 3.5 %) -> no new entries today
-          equity loss >= DAILY_FLATTEN(default 4.25 %) -> close everything, halt for the day
+  daily:  equity loss >= DAILY_BLOCK  (70 % of the firm's daily limit: 5 % -> 3.5 %, 3 % -> 2.1 %)
+                                       -> no new entries today
+          equity loss >= DAILY_FLATTEN(85 % of the limit: 5 % -> 4.25 %, 3 % -> 2.55 %)
+                                       -> close everything, halt for the day
   max:    equity <= initial x (1 - MAX_BLOCK)   (default 7 %)  -> no new entries
           equity <= initial x (1 - MAX_FLATTEN) (default 8.5 %) -> close everything, KILL_SWITCH
   profit target reached -> optional stop-trading (lock in the pass)
@@ -20,18 +22,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+DAILY_BLOCK_SHARE = 0.70        # stop new entries at 70 % of the firm's daily loss limit
+DAILY_FLATTEN_SHARE = 0.85      # close everything at 85 %
 
 @dataclass
 class PropRules:
     initial_balance: float
     daily_loss_limit: float = 0.05          # firm rule
     max_loss_limit: float = 0.10            # firm rule (static, from initial balance)
-    daily_block: float = 0.035              # our buffers
-    daily_flatten: float = 0.0425
+    daily_block: float | None = None        # our buffers; None = scale with daily_loss_limit
+    daily_flatten: float | None = None
     max_block: float = 0.07
     max_flatten: float = 0.085
     profit_target: float | None = 0.10      # phase target; None = funded (no target)
     stop_at_target: bool = True
+
+    def __post_init__(self):
+        if self.daily_block is None:
+            self.daily_block = round(DAILY_BLOCK_SHARE * self.daily_loss_limit, 6)
+        if self.daily_flatten is None:
+            self.daily_flatten = round(DAILY_FLATTEN_SHARE * self.daily_loss_limit, 6)
 
 
 @dataclass

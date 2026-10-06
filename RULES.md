@@ -64,7 +64,10 @@ Requirements before setting `LIVE_ACCOUNT_MODE=real` in `.env`:
   XAUUSD and XAUEUR are the same market — trade one (set `MULTI_SYMBOLS` in `.env`).
 - Sends only if `MULTI_LIVE_TRADING=true` AND `LIVE_TRADING=true` AND the account type matches
   `LIVE_ACCOUNT_MODE`. Risk 0.5 % of equity per trade; skipped if the minimum lot risks > 1 %.
-- Guard: max 6 positions, 3 % total open risk, 2 per group, 4 % daily loss stop, 8 % drawdown pause.
+- Guard: max 6 positions, 3 % total open risk, 1 per group (`MULTI_MAX_PER_GROUP=1` in `.env`,
+  2026-10-06), 4 % daily loss stop, 8 % drawdown pause. Every group except Metals holds one symbol,
+  so this only stops XAUUSD + XAUEUR being open together. Backtest 2 → 1 per group: CAGR 49 → 37 %,
+  max DD 15.2 → 14.3 %, prop pass (all 3 stages) 89 → 94 %, phase-1 median 113 → 147 days.
 - News: no entries 15 min before → 30 min after high-impact events in the symbol's currencies.
 - Portfolio backtest (`PORTFOLIO_SIM.md`): CAGR ~49 %, max DD −15 %, 414 days longest under water,
   89 % prop-challenge pass. **Backtest numbers; at +0.10 R/trade live expect ~25–30 %/yr.**
@@ -74,13 +77,34 @@ Requirements before setting `LIVE_ACCOUNT_MODE=real` in `.env`:
 Active in `execution/live_multi.py` whenever `PROP_CHALLENGE` is set (logic in `risk/prop_controls.py`):
 | Trigger | Action |
 |---|---|
-| Daily equity loss ≥ 3.5% of the day's baseline (higher of opening balance/equity; day starts 21:00 UTC) | no new entries today |
-| Daily equity loss ≥ 4.25% | close all bot positions, halt until the next trading day |
+| Daily equity loss ≥ 70% of the firm's daily limit (3% limit → 2.1%, 5% → 3.5%) of the day's baseline (higher of opening balance/equity; day starts 21:00 UTC) | no new entries today |
+| Daily equity loss ≥ 85% of the limit (3% → 2.55%, 5% → 4.25%) | close all bot positions, halt until the next trading day |
 | Equity ≥ 7% below the phase starting balance | no new entries |
 | Equity ≥ 8.5% below the phase starting balance | close all, write KILL_SWITCH |
 | Phase target reached (+8% phase 1, +5% phase 2) | no new entries (pass locked in) |
 | One trade idea's floating loss ≥ 0.9% of account size | close it (stays under the 1% strike trigger) |
 | A losing trade closed < 10 minutes ago | no new entry (avoids "trade idea" grouping) |
 | Little daily room left | risk per trade shrinks so all open stops fit inside the remaining room |
-Firm limits: 5% daily, 10% static max loss, 30-day inactivity (tracked), funded-only news window.
+Firm limits: 3% or 5% daily (`PROP_DAILY_LOSS_LIMIT`, default 0.03 since 2026-10-06), 10% static max loss, 30-day inactivity (tracked), funded-only news window.
 Reward cycle on the funded account: **Bi-weekly 80%** (the 35% consistency rule blocks Monthly in ~2 of 3 months).
+
+## 9. FundingPips 2-Step Standard -- official help centre, read 2026-10-06 (Chrome)
+Sources: help.fundingpips.com articles "2 Step Standard" and "Trading Conduct and Security Standards".
+
+| Rule | Official text (summary) | What it means for this bot |
+|---|---|---|
+| Targets / days | Phase 1 8 %, Phase 2 5 %, min 3 trading days each (none with the 3 % daily add-on) | already in challenge_tracker |
+| Daily loss | 5 % (or **3 % add-on**) of the higher of opening balance / equity; floating counts; resets 00:00 UTC+3 | bot buffers scale: block 70 %, flatten 85 % of `PROP_DAILY_LOSS_LIMIT` (default 3 %) |
+| Max loss | 10 % below starting size, equity or balance, any time | in prop_guard |
+| Inactivity | breach after 30 days without a completed trade | tracked |
+| EAs | own EA = full automation allowed **with proof of ownership** (source code, version-control history, dev environment, or explain the logic on a call) | keep git history; commit regularly |
+| **VPN / VPS** | **connecting to the account through a VPN or VPS is not permitted**; IP region must stay consistent | run on the home PC only; it must never sleep |
+| Forbidden | gap trading, HFT, server spamming, latency/reverse arbitrage, toxic flow, hedging, tick scalping, churning, copy trading in, third-party management | none apply |
+| News (eval) | no restriction, but purposely trading news is prohibited | live news filter stays on |
+| News (Master) | profits of trades opened or closed within +-5 min of red news (+-10 min of speeches) may be deducted, unless opened >= 5 h before | soft breach only |
+| Holding (Master) | without the Swing add-on, every position is auto-closed daily 20:45-21:00 UTC (summer) / 21:45-22:00 UTC (winter) | backtest: mean R +0.160 -> +0.165 (29 % of trades cut, no swap) -> Swing add-on not needed |
+| Instruments | 41: XAUUSD, XAGUSD, GER40, NDX100, SPX500, DJI30, JP225, FTSE100, STX50, BTCUSD, ETHUSD, oils, 28 FX. **No XAUEUR** | MULTI_SYMBOLS on FundingPips = BTCUSD, XAUUSD, GER40 (exact names from the terminal) |
+| Commission | FX / metals $5 per lot, indices/energies 0, **crypto lot x price x 0.04 %** | BTC edge +0.20 R -> about +0.13-0.17 R |
+| Leverage | eval: metals 1:30, indices 1:20, crypto 1:2; Master: crypto 1:1, dynamic leverage on metals/indices | margin fine at $5k |
+| Lot limit | 20 lots per trade, crypto 1 lot | fine |
+| Rewards | On Demand 90 % needs 35 % consistency; Monthly 100 % needs 7 days >= 0.5 % and lowers the strike trigger to 1 % | 0.9 % idea-loss close already matches |

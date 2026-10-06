@@ -38,11 +38,24 @@ def test_max_loss_static_from_phase_start():
 
 
 def test_warning_at_70_percent_once_per_day():
-    st = ct.new_state(5000, T0)
-    ct.update(st, now=T0, equity=5000, balance=5000, traded_days=set())
-    ev1 = ct.update(st, now=T0 + timedelta(hours=1), equity=4820, balance=5000, traded_days=set())   # 3.6 %
-    ev2 = ct.update(st, now=T0 + timedelta(hours=2), equity=4815, balance=5000, traded_days=set())
+    r5 = ct.ChallengeRules(daily_loss=0.05)                                   # a 5 % daily-limit account
+    st = ct.new_state(5000, T0, r5)
+    ct.update(st, now=T0, equity=5000, balance=5000, traded_days=set(), rules=r5)
+    ev1 = ct.update(st, now=T0 + timedelta(hours=1), equity=4820, balance=5000, traded_days=set(), rules=r5)   # 3.6 %
+    ev2 = ct.update(st, now=T0 + timedelta(hours=2), equity=4815, balance=5000, traded_days=set(), rules=r5)
     assert any("warning: daily" in e for e in ev1) and not ev2
+
+
+def test_default_daily_limit_is_three_percent_and_reported(monkeypatch):
+    monkeypatch.delenv("PROP_DAILY_LOSS_LIMIT", raising=False)
+    r = ct.current_rules()
+    assert r.daily_loss == 0.03
+    st = ct.new_state(5000, T0, r)
+    ct.update(st, now=T0, equity=5000, balance=5000, traded_days=set(), rules=r)
+    ev = ct.update(st, now=T0 + timedelta(hours=1), equity=4845, balance=5000, traded_days=set(), rules=r)   # 3.1 %
+    assert st["daily_loss_limit"] == 0.03 and st["result"] == "failed" and any("FAILED" in e for e in ev)
+    monkeypatch.setenv("PROP_DAILY_LOSS_LIMIT", "0.05")
+    assert ct.current_rules().daily_loss == 0.05
 
 
 def test_run_from_files(tmp_path):

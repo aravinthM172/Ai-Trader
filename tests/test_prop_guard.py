@@ -36,3 +36,11 @@ def test_risk_shrinks_with_daily_room():
     # 3 % lost today -> 0.5 % room left, 2 open -> 0.5/3 %
     assert abs(max_risk_per_trade(R, equity=9_700, day_start=10_000, n_open=2) - 0.005 / 3) < 1e-12
     assert max_risk_per_trade(R, equity=9_600, day_start=10_000, n_open=0) == 0.0
+
+
+def test_buffers_scale_with_the_daily_limit():
+    assert (R.daily_block, R.daily_flatten) == (0.035, 0.0425)          # 5 %: unchanged from before
+    r3 = PropRules(initial_balance=5_000, daily_loss_limit=0.03)
+    assert (r3.daily_block, r3.daily_flatten) == (0.021, 0.0255)
+    assert not evaluate(r3, equity=4_890, day_start=5_000).allow_entries   # -2.2 %
+    assert evaluate(r3, equity=4_870, day_start=5_000).flatten             # -2.6 %

@@ -5,7 +5,8 @@ would judge it, so the real challenge is bought only after the demo has passed.
 Default rules = FundingPips 2-Step Standard (verified 2026-10-04 from their checkout page
 and help-centre excerpts):
   Phase 1: +8 % target, Phase 2: +5 % target, min 3 trading days per phase,
-  daily loss 5 % of max(day-start balance, day-start equity), max loss 10 % of the phase's
+  daily loss 3 % or 5 % (bought option; PROP_DAILY_LOSS_LIMIT in .env, default 0.03 = the stricter one)
+  of max(day-start balance, day-start equity), max loss 10 % of the phase's
   starting balance (static).  Phase 2 restarts from the balance at which phase 1 passed
   (the firm gives a fresh account of the same size; on the demo we rebase instead).
 
@@ -15,7 +16,8 @@ trade DB (trading days).  It never trades.  Called every watchdog pass; run by h
     python -m tools.challenge_tracker --reset    # start a new rehearsal from the current balance
 
 Limits are checked on each status update (every ~30 s), so a very fast spike between two
-updates could be missed -- the prop guard's buffers (block 3.5 %, flatten 4.25 %) exist for that.
+updates could be missed -- the prop guard's buffers (block at 70 %, flatten at 85 % of the daily
+limit) exist for that.  The limit is written to the status file as "daily_loss_limit" for the trader.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ import json
 import os
 import sqlite3
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -42,13 +44,18 @@ class ChallengeRules:
     name: str = "FundingPips 2-Step Standard"
     targets: tuple = (0.08, 0.05)
     min_days: tuple = (3, 3)
-    daily_loss: float = 0.05
+    daily_loss: float = 0.03            # 3 % or 5 % (bought option); runtime value: current_rules()
     max_loss: float = 0.10
     day_reset_utc_hour: int = 21        # FundingPips server time is UTC+3 -> trading day starts 21:00 UTC
     inactivity_days: int = 30           # hard breach: no completed trade within 30 consecutive days
 
 
 FUNDINGPIPS_2STEP_STANDARD = ChallengeRules()
+
+
+def current_rules() -> ChallengeRules:
+    """Rules with the daily loss limit from PROP_DAILY_LOSS_LIMIT (read at call time, after .env is loaded)."""
+    return replace(FUNDINGPIPS_2STEP_STANDARD, daily_loss=float(os.getenv("PROP_DAILY_LOSS_LIMIT", "0.03")))
 
 
 def trading_day(ts: datetime, reset_hour: int) -> str:
@@ -60,13 +67,14 @@ def new_state(balance: float, now: datetime, rules: ChallengeRules = FUNDINGPIPS
     return {"rules": rules.name, "started_utc": now.isoformat(), "phase": 1, "result": "in_progress",
             "phase_start_balance": balance, "phase_started_utc": now.isoformat(), "trading_days": [],
             "day": None, "day_ref": balance, "worst_daily_loss": 0.0, "worst_total_loss": 0.0,
-            "history": []}
+            "daily_loss_limit": rules.daily_loss, "history": []}
 
 
 def update(st: dict, *, now: datetime, equity: float, balance: float, traded_days: set[str],
            rules: ChallengeRules = FUNDINGPIPS_2STEP_STANDARD, last_closed: datetime | None = None) -> list[str]:
     """Advance the challenge state with one observation; returns event messages."""
     events: list[str] = []
+    st["daily_loss_limit"] = rules.daily_loss                 # read by risk/prop_controls (the trader's buffers)
     if st["result"] in ("passed", "failed"):
         return events
     day = trading_day(now, rules.day_reset_utc_hour)
@@ -153,7 +161,8 @@ def enabled() -> bool:
 
 
 def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: Path = DB,
-                   out: Path = OUT, rules: ChallengeRules = FUNDINGPIPS_2STEP_STANDARD) -> list[str]:
+                   out: Path = OUT, rules: ChallengeRules | None = None) -> list[str]:
+    rules = rules or current_rules()
     try:
         stat = json.loads(status_path.read_text(encoding="utf-8"))
     except Exception:

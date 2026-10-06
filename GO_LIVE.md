@@ -53,3 +53,26 @@ With the balance still at $100 the 5 % cap (`BTC_MAX_RISK_PER_TRADE=0.05`) block
   The bot never chases price more than 15 min into a bar.
 - The Valetax history CSVs label winter bars 1 h early (single-offset UTC conversion in `mt5/gateway.py`).
   Live trading is unaffected, because the offset is re-detected on every connect, but CSV exports mix seasons.
+
+---
+
+# Real-account checklist -- multi-symbol trader (added 2026-10-06)
+
+The first live week (demo) lost money mostly to problems, not the strategy: DAX40 sized 11x
+(fixed), MT5/PC down ~19 h with missed trades, XAUUSD + XAUEUR losing together.  The preflight
+checks catch each of these. **Run it and get `READY` before switching to real money.**
+
+    venv\Scripts\python -m tools.go_live_preflight --balance <planned deposit>
+
+It also runs every day at 07:00 (scheduled task "GoldAI Preflight") and sends a Telegram message if a check FAILs.
+
+1. **Account size** (retail-broker view; a FundingPips account is bought at a fixed size and $5k fits all symbols): the 0.01 minimum lot must fit under the 1 % cap.  On 2026-10-06: BTC < $1,000,
+   DAX40 ~$1,420, XAUEUR ~$2,610, XAUUSD ~$2,950.  **All four need ~$3,000; use $3,500+.**
+   Below that, the preflight lists which symbols would be skipped.
+2. **.env**: `MULTI_MAX_PER_GROUP=1`, `MULTI_SYMBOLS` = the FundingPips names of BTCUSD, XAUUSD and GER40 (FundingPips has no XAUEUR), and `LIVE_ACCOUNT_MODE` = the type the preflight reports for the FundingPips account (prop accounts often show as DEMO).
+   Restart the trader after any `.env` change. The preflight fails if the running trader is older than `.env`.
+3. **Run 24/7 on the home PC** (FundingPips forbids VPN/VPS access): no trader gap over 1 h in the last 7 days. The laptop must never enter Modern Standby (plugged in, lid action "Do nothing", sleep "Never") and Windows Update must not restart it,
+   with MT5 logged in and Algo Trading ON.
+4. **Sizing**: every symbol shows PASS. The broker's own loss-at-stop matches the plan (x1.00).
+5. **Symbols**: real accounts can use different symbol names or contract specs.  A missing symbol shows up as a sizing FAIL.
+6. After switching on, read the first few `LIVE OPEN` lines in `logs/multi_live.log` against the preflight plan.

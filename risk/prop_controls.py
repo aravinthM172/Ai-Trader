@@ -4,7 +4,9 @@ official help centre).  Pure decision logic; execution/live_multi.py acts on the
 
 Combines:
   1. prop_guard.evaluate      -- daily / max-loss buffers and the phase profit target
-                                 (block entries -> flatten -> kill, before the firm's limits)
+                                 (block entries -> flatten -> kill, before the firm's limits).
+                                 Daily limit = challenge state "daily_loss_limit" (PROP_DAILY_LOSS_LIMIT,
+                                 3 % or 5 %); missing -> 3 %.
   2. trade-idea loss cap      -- close any position whose floating loss reaches 0.9 % of the
                                  account size, before it can count as a 1 % "strike"
                                  (Striking System on Master accounts; also limits gap losses)
@@ -22,6 +24,7 @@ from risk.prop_guard import PropRules, evaluate, max_risk_per_trade
 IDEA_LOSS_CLOSE = 0.009          # fraction of account size
 LOSS_COOLDOWN_MIN = 10
 TARGETS = {1: 0.08, 2: 0.05}     # phase targets; funded (phase 3+) has none
+STRICT_DAILY_LOSS = 0.03         # FundingPips sells 3 % and 5 % daily limits; without a reported limit use 3 %
 
 
 @dataclass
@@ -45,7 +48,8 @@ def rules_from_challenge(ch: dict) -> PropRules | None:
     base = float(ch.get("phase_start_balance") or 0)
     if base <= 0:
         return None
-    return PropRules(initial_balance=base, profit_target=TARGETS.get(int(ch.get("phase") or 0)))
+    daily = float(ch.get("daily_loss_limit") or STRICT_DAILY_LOSS)      # unknown -> assume the stricter limit
+    return PropRules(initial_balance=base, daily_loss_limit=daily, profit_target=TARGETS.get(int(ch.get("phase") or 0)))
 
 
 def ideas_over_limit(positions: list[dict], account_size: float, limit: float = IDEA_LOSS_CLOSE) -> list[int]:
