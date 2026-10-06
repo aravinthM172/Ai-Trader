@@ -98,6 +98,27 @@ GUARD = pg.GuardConfig(
 
 
 # -- configuration -------------------------------------------------------------
+def parse_symbol_risk(raw: str) -> dict[str, float]:
+    """'XAUUSD=0.0025, GER40=0.0025' -> {'XAUUSD': 0.0025, 'GER40': 0.0025}; bad entries are ignored."""
+    out = {}
+    for part in raw.split(","):
+        sym, _, val = part.partition("=")
+        try:
+            if sym.strip() and 0 < float(val) <= MAX_RISK_PER_TRADE:
+                out[sym.strip()] = float(val)
+        except ValueError:
+            continue
+    return out
+
+
+# per-symbol risk by strength of evidence (MULTI_SYMBOL_RISK in .env); unlisted symbols use RISK_PER_TRADE
+SYMBOL_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_RISK", ""))
+
+
+def symbol_risk(symbol: str) -> float:
+    return SYMBOL_RISK.get(symbol, RISK_PER_TRADE)
+
+
 def symbols() -> list[str]:
     env = os.getenv("MULTI_SYMBOLS", "").strip()
     if env:
@@ -328,7 +349,7 @@ def run_once(*, now: datetime | None = None) -> dict:
     ls = _load_ls()
     c = _conn()
     gw = MT5Gateway()
-    status = {"generated_utc": now.isoformat(), "symbols": syms, "risk_per_trade": RISK_PER_TRADE,
+    status = {"generated_utc": now.isoformat(), "symbols": syms, "risk_per_trade": RISK_PER_TRADE, "symbol_risk": SYMBOL_RISK,
               "kill_switch_active": safety.kill_switch_active(), "entries": {}}
     if not syms:
         status["error"] = "no symbols (run backtest.multi_symbol_scan or set MULTI_SYMBOLS)"
@@ -400,7 +421,7 @@ def run_once(*, now: datetime | None = None) -> dict:
                     continue
                 status["entries"][s] = res = _evaluate_symbol(
                     gw, mt5, c, s, specs[s], groups[s], due, now, equity, news, gst, send_ok, ls,
-                    risk=min(RISK_PER_TRADE, prop.risk_cap) if prop is not None else RISK_PER_TRADE)
+                    risk=min(symbol_risk(s), prop.risk_cap) if prop is not None else symbol_risk(s))
                 if res.get("final"):
                     evaluated[key] = res.get("decision", "done")
         ls["evaluated"] = dict(sorted(evaluated.items())[-2000:])

@@ -189,3 +189,15 @@ def test_dax_trade_sized_to_planned_risk():
     vol, risk, _ = lm.size_volume(equity=5000, risk_frac=0.005, max_risk_frac=0.02, sl_dist=129.5,
                                   value_per_unit=vpu, vmin=0.01, vstep=0.01, vmax=50)
     assert vol == 0.01 and risk <= 25          # was 0.19 lots (~$276 real risk) before the fix
+
+
+# -- per-symbol risk (MULTI_SYMBOL_RISK) ------------------------------------------------------
+def test_parse_symbol_risk_ignores_bad_and_oversized_entries():
+    r = lm.parse_symbol_risk(" XAUUSD=0.0025, GER40 = 0.0025 ,BAD,NAS100=abc,BTCUSD=0.5,=0.001")
+    assert r == {"XAUUSD": 0.0025, "GER40": 0.0025}           # 0.5 > MAX_RISK_PER_TRADE -> dropped
+
+
+def test_symbol_risk_falls_back_to_default(monkeypatch):
+    monkeypatch.setattr(lm, "SYMBOL_RISK", {"XAUUSD": 0.0025})
+    assert lm.symbol_risk("XAUUSD") == 0.0025
+    assert lm.symbol_risk("BTCUSD") == lm.RISK_PER_TRADE

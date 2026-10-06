@@ -135,7 +135,7 @@ def check_sizing(gw, rep: Report, syms, specs, equity: float, label: str, planne
             if vpu is None:
                 rep.add("sizing", "FAIL", f"{s} {d}: {note}", symbol=s)
                 continue
-            vol, risk_usd, why = lm.size_volume(equity=bal, risk_frac=lm.RISK_PER_TRADE, max_risk_frac=lm.MAX_RISK_PER_TRADE,
+            vol, risk_usd, why = lm.size_volume(equity=bal, risk_frac=lm.symbol_risk(s), max_risk_frac=lm.MAX_RISK_PER_TRADE,
                                                 sl_dist=sl_d, value_per_unit=vpu, vmin=spec.volume_min,
                                                 vstep=spec.volume_step, vmax=spec.volume_max)
             if vol <= 0:
