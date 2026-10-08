@@ -150,10 +150,12 @@ def ticks(gw) -> dict:
     try:
         acct = gw.account_info()
         pos = gw.positions()
+        # floating P/L as MT5 shows it: equity - balance (includes swap, which position.profit leaves out)
         out["account"] = {"equity": acct.get("equity"), "balance": acct.get("balance"),
-                          "floating": round(sum(p["profit"] for p in pos), 2), "open": len(pos)}
+                          "floating": round(acct["equity"] - acct["balance"], 2), "open": len(pos)}
         out["positions"] = [{"symbol": p["symbol"], "type": p["type"], "volume": p["volume"],
-                             "price_open": p["price_open"], "sl": p["sl"], "tp": p["tp"], "profit": p["profit"]} for p in pos]
+                             "price_open": p["price_open"], "sl": p["sl"], "tp": p["tp"],
+                             "profit": round(p["profit"] + p.get("swap", 0.0), 2)} for p in pos]
     except Exception:
         pass
     for s in TICK_SYMBOLS:

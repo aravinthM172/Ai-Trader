@@ -413,6 +413,7 @@ class MT5Gateway:
             "sl": float(field(p, "sl", 0.0)),
             "tp": float(field(p, "tp", 0.0)),
             "profit": float(field(p, "profit", 0.0)),
+            "swap": float(field(p, "swap", 0.0)),
             "time": int(field(p, "time", 0)),
             "magic": int(field(p, "magic", 0)),
         } for p in pos]

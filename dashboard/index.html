@@ -270,7 +270,7 @@ function renderTiles() {
   eqTile.querySelector(".value").id = "liveEquity"; eqTile.querySelector(".sub").id = "liveEquitySub";
   T.append(eqTile);
   const openPos = ((S.multi || {}).status || {}).open_positions || [];
-  const openPL = openPos.reduce((a, p) => a + (Number(p.profit) || 0), 0);
+  const openPL = openPos.reduce((a, p) => a + (Number(p.profit) || 0) + (Number(p.swap) || 0), 0);
   const plTile = tile("Open P/L · live", "", `${openPos.length} open trade${openPos.length === 1 ? "" : "s"}`);
   plTile.querySelector(".value").id = "liveOpenPL"; plTile.querySelector(".sub").id = "liveOpenPLSub";
   T.append(plTile); setPL("liveOpenPL", openPL);
@@ -429,7 +429,7 @@ function positionsTable(pos, quotes) {
     const toSL = now && p.sl ? Math.abs(now - p.sl) : null, toTP = now && p.tp ? Math.abs(p.tp - now) : null;
     const span = p.sl && p.tp ? Math.abs(p.tp - p.sl) : null;
     const prog = span && now ? 100 * (buy ? now - p.sl : p.sl - now) / span : null;   // 0 % = at SL, 100 % = at TP
-    return { ...p, now, toSL, toTP, prog };
+    return { ...p, profit: (Number(p.profit) || 0) + (Number(p.swap) || 0), now, toSL, toTP, prog };   // P/L incl. swap, as MT5 shows
   });
   return table(rows, [["symbol", "Symbol", short], ["type", "Side"], ["volume", "Lots", null, 1], ["price_open", "Entry", px, 1],
     ["now", "Now", px, 1],
