@@ -201,3 +201,11 @@ def test_symbol_risk_falls_back_to_default(monkeypatch):
     monkeypatch.setattr(lm, "SYMBOL_RISK", {"XAUUSD": 0.0025})
     assert lm.symbol_risk("XAUUSD") == 0.0025
     assert lm.symbol_risk("BTCUSD") == lm.RISK_PER_TRADE
+
+
+def test_no_connection_rejection_is_retried_next_pass():
+    out = lm.send_outcome({"ok": False, "retcode": 10031})
+    assert out["decision"] == "retry" and not out.get("final")
+    assert lm.send_outcome({"ok": False, "retcode": 10019})["final"] is True       # e.g. no money: give up on the bar
+    assert lm.send_outcome({"ok": False, "error": "order_check failed: None", "retcode": None})["final"] is True
+    assert lm.send_outcome({"ok": True, "ticket": 1})["decision"] == "sent"

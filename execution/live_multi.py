@@ -68,6 +68,7 @@ MAX_HOLD_H = 96
 DEVIATION = 50
 _DONE = {10008, 10009, 10010}
 _RETRY = {10004, 10020, 10021}
+_NO_CONNECTION = 10031          # terminal rejected the request locally (link to the trade server down); nothing reached the broker
 _ACCOUNT_MODES = {0: "demo", 1: "contest", 2: "real"}
 
 
@@ -323,7 +324,7 @@ def _send(gw, spec, direction, volume, sl_d, tp_d, magic, c) -> dict:
                             sl=sl, tp=tp, magic=magic, comment=COMMENT, deviation=DEVIATION)
         chk = gw.order_check(req)
         if not chk or chk.get("retcode") != 0:
-            return {"ok": False, "error": f"order_check failed: {chk}"}
+            return {"ok": False, "retcode": (chk or {}).get("retcode"), "error": f"order_check failed: {chk}"}
         r = mt5.order_send(req)
         rc = int(getattr(r, "retcode", -1)) if r is not None else -1
         _event(c, "order_send", {"symbol": spec.symbol, "attempt": attempt, "retcode": rc, "request": req})
@@ -492,7 +493,18 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         pg.on_open(gst, symbol=s, group=group, risk_frac=risk_usd / equity)
         log.warning("LIVE OPEN #%s %s %s %.2f @ %.5g SL %.5g TP %.5g risk $%.2f", res["ticket"], s, sig.decision, vol,
                     res["fill"], res["sl"], res["tp"], risk_usd)
-    return {**out, "decision": "sent" if res.get("ok") else "send_failed", "result": res, "final": True}
+    return {**out, **send_outcome(res, s)}
+
+
+def send_outcome(res: dict, symbol: str = "") -> dict:
+    """Decision after a send.  A dropped link to the trade server is not final: the bar is evaluated again on the
+    next pass (signal, guard and sizing all redone), for as long as the entry window is open."""
+    if res.get("ok"):
+        return {"decision": "sent", "result": res, "final": True}
+    if res.get("retcode") == _NO_CONNECTION:
+        log.warning("%s order rejected: no connection to the trade server -> retry next pass", symbol)
+        return {"decision": "retry", "reason": "no connection to trade server", "result": res}
+    return {"decision": "send_failed", "result": res, "final": True}
 
 
 def _emergency_flatten(gw, c, mine, specs, allowed: bool) -> dict:
