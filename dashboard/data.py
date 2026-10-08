@@ -24,7 +24,7 @@ FILES = dict(btc_status=R / "btc_live_status.json", multi_status=R / "multi_live
              challenge=R / "challenge_status.json", edge=R / "edge_monitor_multi.json",
              btc_db=S / "btc_live_H1.sqlite", multi_db=S / "multi_live.sqlite",
              notify_log=ROOT / "logs" / "notify.log", kill=S / "KILL_SWITCH")
-SL_ATR, TP_ATR = 2.0, 3.0
+SL_ATR, TP_ATR = 2.0, 6.0          # must match execution/live_multi.py (target 3 -> 6 ATR on 2026-10-08)
 _cache: dict = {}
 
 

@@ -404,7 +404,7 @@ function renderNext() {
   if (r.plan) {
     N.append(el("h2", {style: "margin-top:12px"}, fired ? "Order at next bar open" : `If ${r.closest_side} fires`));
     const tb = el("table");
-    for (const [k, v] of [["Entry ≈", r.plan.entry], ["Stop loss (2 ATR)", r.plan.sl], ["Take profit (3 ATR)", r.plan.tp]])
+    for (const [k, v] of [["Entry ≈", r.plan.entry], ["Stop loss (2 ATR)", r.plan.sl], ["Take profit (6 ATR)", r.plan.tp]])
       tb.append(el("tr", {}, el("td", {}, k), el("td", {}, fmt(v, v > 100 ? 2 : 5))));
     N.append(tb);
   }

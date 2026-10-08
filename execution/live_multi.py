@@ -19,7 +19,7 @@ Per entry, in order (any failure = no order):
 Then it SENDS only if ALL of:  MULTI_LIVE_TRADING=true, LIVE_TRADING=true, account
 mode == LIVE_ACCOUNT_MODE (default demo).  Otherwise: dry run, logged as WOULD SEND.
 
-After a fill: broker SL (2 ATR) / TP (3 ATR) re-anchored at the fill; SL verified,
+After a fill: broker SL (2 ATR) / TP (6 ATR) re-anchored at the fill; SL verified,
 else the position is closed.  Time exit after 96 bars.  One position per symbol.
 
     python -m execution.live_multi              # one pass
@@ -63,7 +63,7 @@ LS = STATE / "multi_live_state.json"
 FLATTEN = STATE / "EMERGENCY_FLATTEN"             # set by the website Emergency stop (dashboard/publisher.py)
 COMMENT = "mom-multi"
 MAGIC_BASE = 26_100_000
-SL_ATR, TP_ATR = 2.0, 3.0
+SL_ATR, TP_ATR = 2.0, 6.0          # target 3 -> 6 ATR on 2026-10-08 (FP backtest 2021-26: +0.008R -> +0.056R/trade)
 MAX_HOLD_H = 96
 DEVIATION = 50
 _DONE = {10008, 10009, 10010}

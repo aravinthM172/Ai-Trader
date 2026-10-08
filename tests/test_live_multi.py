@@ -24,7 +24,7 @@ def test_size_volume_min_lot_allowed_only_under_ceiling():
 
 def test_stop_plan_geometry_and_broker_minimum():
     sl, tp, sl_d = lm.stop_plan("BUY", 100.0, 1.0, stops_level=0.1)
-    assert (sl, tp, sl_d) == (98.0, 103.0, 2.0)
+    assert (sl, tp, sl_d) == (98.0, 106.0, 2.0)
     sl, tp, sl_d = lm.stop_plan("SELL", 100.0, 0.01, stops_level=1.0)       # broker minimum dominates
     assert sl_d == 1.15 and sl == 101.15 and abs(tp - 98.85) < 1e-9
 
