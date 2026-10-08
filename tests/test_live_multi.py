@@ -209,3 +209,55 @@ def test_no_connection_rejection_is_retried_next_pass():
     assert lm.send_outcome({"ok": False, "retcode": 10019})["final"] is True       # e.g. no money: give up on the bar
     assert lm.send_outcome({"ok": False, "error": "order_check failed: None", "retcode": None})["final"] is True
     assert lm.send_outcome({"ok": True, "ticket": 1})["decision"] == "sent"
+
+
+# ---- daily regime filter wiring (MULTI_REGIME_SYMBOLS) ---------------------------------
+import numpy as _np
+from types import SimpleNamespace as _NS
+
+
+class _RegimeGw:
+    def __init__(self, d1):
+        self.d1 = d1
+
+    def get_rates(self, s, tf, n):
+        if tf == "D1":
+            return self.d1
+        t = pd.date_range("2026-10-05 00:00", periods=400, freq="h", tz="UTC")
+        return pd.DataFrame({"time": t, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0})
+
+
+def _regime_call(monkeypatch, d1, regime_syms, news_blocks=True):
+    monkeypatch.setattr(lm, "REGIME_SYMBOLS", regime_syms)
+    monkeypatch.setattr(lm.btc_h1_signal, "generate", lambda s, done: _NS(decision="BUY", signal_bar_utc="sig"))
+    news = _NS(blocking_event=lambda s, now: {"event": "CPI"}, is_blocked=lambda s, now: news_blocks)
+    bars = _RegimeGw(d1).get_rates("XAUUSD", "H1", 400)
+    due = bars.time.iloc[-2].isoformat()                       # last completed bar
+    now = (bars.time.iloc[-1] + pd.Timedelta(minutes=5)).to_pydatetime()
+    return lm._evaluate_symbol(_RegimeGw(d1), None, None, "XAUUSD", object(), "Metals", due, now, 5000.0,
+                               news, None, False, {})
+
+
+def _daily(closes):
+    t = pd.date_range("2024-01-01 21:00", periods=len(closes), freq="D", tz="UTC")
+    return pd.DataFrame({"time": t, "open": closes, "high": closes, "low": closes, "close": closes})
+
+
+def test_regime_filter_blocks_counter_trend_entry(monkeypatch):
+    res = _regime_call(monkeypatch, _daily(_np.linspace(200, 100, 700)), {"XAUUSD"})     # downtrend, BUY signal
+    assert res["decision"] == "blocked" and res["final"] is True and res["reason"].startswith("regime")
+
+
+def test_regime_filter_lets_with_trend_entry_through(monkeypatch):
+    res = _regime_call(monkeypatch, _daily(_np.linspace(100, 200, 700)), {"XAUUSD"})     # uptrend, BUY signal
+    assert "news" in res.get("reason", "")                    # passed the filter, stopped by the next check
+
+
+def test_regime_filter_off_for_unlisted_symbols(monkeypatch):
+    res = _regime_call(monkeypatch, _daily(_np.linspace(200, 100, 700)), set())
+    assert "news" in res.get("reason", "")
+
+
+def test_regime_filter_without_daily_data_retries(monkeypatch):
+    res = _regime_call(monkeypatch, None, {"XAUUSD"})
+    assert res["decision"] == "retry" and not res.get("final")

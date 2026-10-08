@@ -8,13 +8,13 @@ def _bars(rows):
 
 
 def test_simulate_exit_target_stop_and_stop_first():
-    # BUY at 100, ATR 10 -> stop 80, target 130
-    assert tc.simulate_exit("BUY", 100, 10, _bars([[100, 105, 95, 101], [101, 131, 99, 130]]))[:2] == ("target", 1.5)
+    # BUY at 100, ATR 10 -> stop 80, target 160 (6 ATR)
+    assert tc.simulate_exit("BUY", 100, 10, _bars([[100, 105, 95, 101], [101, 161, 99, 160]]))[:2] == ("target", 3.0)
     assert tc.simulate_exit("BUY", 100, 10, _bars([[100, 101, 79, 80]]))[:2] == ("stop", -1.0)
     # both touched inside one bar -> stop first (conservative)
-    assert tc.simulate_exit("BUY", 100, 10, _bars([[100, 135, 75, 100]]))[:2] == ("stop", -1.0)
+    assert tc.simulate_exit("BUY", 100, 10, _bars([[100, 165, 75, 100]]))[:2] == ("stop", -1.0)
     # SELL mirror
-    assert tc.simulate_exit("SELL", 100, 10, _bars([[100, 102, 69, 70]]))[:2] == ("target", 1.5)
+    assert tc.simulate_exit("SELL", 100, 10, _bars([[100, 102, 39, 40]]))[:2] == ("target", 3.0)
     reason, r, held = tc.simulate_exit("SELL", 100, 10, _bars([[100, 101, 99, 100]] * 3))
     assert reason == "open" and held == 3
 

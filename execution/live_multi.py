@@ -50,7 +50,7 @@ from execution.order_validator import build_request
 from news.filter import NewsFilter
 from risk import portfolio_guard as pg
 from risk import prop_controls
-from strategy import btc_h1_signal
+from strategy import btc_h1_signal, regime_filter
 
 load_dotenv()
 log = get_logger("multi.live", filename="multi_live.log")
@@ -114,6 +114,8 @@ def parse_symbol_risk(raw: str) -> dict[str, float]:
 
 # per-symbol risk by strength of evidence (MULTI_SYMBOL_RISK in .env); unlisted symbols use RISK_PER_TRADE
 SYMBOL_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_RISK", ""))
+# daily EMA200 trend filter (strategy/regime_filter.py) for these symbols, e.g. MULTI_REGIME_SYMBOLS=XAUUSD; empty = off
+REGIME_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_REGIME_SYMBOLS", ""))
 
 
 def symbol_risk(symbol: str) -> float:
@@ -451,6 +453,12 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
     if sig.decision == "HOLD":
         return {"decision": "hold", "final": True}
     out = {"decision": sig.decision, "signal_bar_utc": sig.signal_bar_utc}
+    if s in REGIME_SYMBOLS:
+        allowed, why = regime_filter.side200(sig.decision, gw.get_rates(s, "D1", regime_filter.D1_BARS), now)
+        if allowed is None:                                  # no daily data yet: try again next pass
+            return {**out, "decision": "retry", "reason": f"regime: {why}"}
+        if not allowed:
+            return {**out, "decision": "blocked", "reason": f"regime: {why}", "final": True}
     ev = news.blocking_event(s, now)
     if news.is_blocked(s, now):
         return {**out, "decision": "blocked", "reason": f"news: {ev['event'] if ev else 'calendar unavailable'}", "final": True}
