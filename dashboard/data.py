@@ -5,6 +5,7 @@ reports and MT5 price history (copy_rates).  Never sends, modifies or closes ord
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from collections import deque
@@ -15,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from backtest.btc_strategies import _ema, _rsi, base_atr
+from strategy import regime_filter
 from strategy.btc_h1_signal import PARAMS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,6 +105,28 @@ def forming_preview(df_all: pd.DataFrame, now: datetime) -> dict | None:
     return {k: r[k] for k in ("decision", "rsi", "momentum", "ema", "close", "buy", "sell")}
 
 
+def order_blocks(symbol: str, decision: str | None, *, open_positions: list[dict], groups: dict,
+                 max_per_group: int, regime: dict | None) -> list[str]:
+    """Why the trader would not place `decision` (BUY / SELL) on `symbol` right now -- the same
+    checks as execution/live_multi.py: one position per pair, the per-group cap and the daily
+    EMA200 trend filter.  Empty list = nothing blocks it."""
+    out = []
+    pos = next((p for p in open_positions if p.get("symbol") == symbol), None)
+    if pos:
+        out.append(f"{pos.get('type')} already open (one per pair)")
+    grp = groups.get(symbol, "")
+    others = [p["symbol"] for p in open_positions if p.get("symbol") != symbol and grp and groups.get(p.get("symbol")) == grp]
+    if max_per_group and len(others) >= max_per_group:
+        out.append(f"group limit: {', '.join(others)} already open in {grp} (max {max_per_group})")
+    if regime:
+        only = regime.get("only")
+        if only is None:
+            out.append(f"trend filter: {regime.get('why', 'no daily data')}")
+        elif decision in ("BUY", "SELL") and decision != only:
+            out.append(f"trend filter: {only.lower()}s only ({regime.get('why')})")
+    return out
+
+
 def next_entry_window(now: datetime) -> dict:
     start = pd.Timestamp(now).floor("1h")
     into = (now - start.to_pydatetime()).total_seconds()
@@ -140,6 +164,11 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                     done = df[df["time"] < pd.Timestamp(now).floor("1h")].reset_index(drop=True)
                     tick = gw.get_tick(s) or {}
                     m1 = gw.get_rates(s, "M1", 240)
+                    info = mt5.symbol_info(s)
+                    regime = None
+                    if s in regime_filter.parse_symbols(os.getenv("MULTI_REGIME_SYMBOLS", "")):
+                        ok, why = regime_filter.side200("BUY", gw.get_rates(s, "D1", regime_filter.D1_BARS), now)
+                        regime = {"only": None if ok is None else "BUY" if ok else "SELL", "why": why}
                     out["symbols"][s] = {
                         "candles": [{"time": int(r.time.timestamp()), "open": r.open, "high": r.high, "low": r.low,
                                      "close": r.close} for r in df.itertuples()],
@@ -149,7 +178,8 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                         "readiness": signal_readiness(done) if len(done) > 120 else {"error": "not enough bars"},
                         "forming": forming_preview(df, now) if len(done) > 120 else None,
                         "bid": tick.get("bid"), "ask": tick.get("ask"), "spread": tick.get("spread"),
-                        "tick_age_s": tick.get("age_seconds")}
+                        "tick_age_s": tick.get("age_seconds"),
+                        "group": (info.path or "").split("\\")[0] if info else "", "regime": regime}
             finally:
                 gw.shutdown()
     except Exception as e:
@@ -327,6 +357,17 @@ def symbol_strength(trades: list[dict], top: int = 12) -> list[dict]:
     return rows[:top]
 
 
+def add_blocks(mkt: dict, open_positions: list[dict]) -> None:
+    """Attach `blocks` (closed-bar signal) and `blocks_forming` to every symbol in a market() result."""
+    syms = mkt.get("symbols") or {}
+    groups = {s: d.get("group", "") for s, d in syms.items()}
+    cap = int(float(os.getenv("MULTI_MAX_PER_GROUP", 2)))
+    for s, d in syms.items():
+        kw = dict(open_positions=open_positions, groups=groups, max_per_group=cap, regime=d.get("regime"))
+        d["blocks"] = order_blocks(s, (d.get("readiness") or {}).get("decision"), **kw)
+        d["blocks_forming"] = order_blocks(s, (d.get("forming") or {}).get("decision"), **kw)
+
+
 def gather() -> dict:
     now = datetime.now(timezone.utc)
     ms, bs = _json(FILES["multi_status"]), _json(FILES["btc_status"])
@@ -353,6 +394,7 @@ def gather() -> dict:
             alerts = [ln.strip().split("NOTIFY ", 1)[-1][:300] for ln in deque(f, maxlen=15) if "NOTIFY" in ln][::-1]
     procs = processes()
     mkt = market(symbols)
+    add_blocks(mkt, (ms or {}).get("open_positions") or [])
     kill = FILES["kill"].read_text(encoding="utf-8").strip()[:200] if FILES["kill"].exists() else None
     try:
         rules = rules_check(challenge=ch, account=mkt.get("account") or {}, multi_status=ms, trades=trades,

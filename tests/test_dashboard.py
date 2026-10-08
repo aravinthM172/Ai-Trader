@@ -171,3 +171,30 @@ def test_publisher_start_refuses_to_override_safety_stop_without_force(tmp_path)
     assert st == "refused" and kill.exists()
     st, _ = pb.execute_command({"action": "start", "force": True}, kill=kill, flatten=tmp_path / "F", running=lambda: True)
     assert st == "done" and not kill.exists()
+
+
+def test_order_blocks_pair_group_and_trend_filter():
+    pos = [{"symbol": "BTCUSD", "type": "SELL"}]
+    groups = {"BTCUSD": "Crypto", "ETHUSD": "Crypto", "NDX100": "Indices"}
+    kw = dict(open_positions=pos, groups=groups)
+    assert dd.order_blocks("BTCUSD", "SELL", max_per_group=2, regime=None, **kw) == ["SELL already open (one per pair)"]
+    assert dd.order_blocks("ETHUSD", "SELL", max_per_group=2, regime=None, **kw) == []
+    assert dd.order_blocks("ETHUSD", "SELL", max_per_group=1, regime=None, **kw) == \
+        ["group limit: BTCUSD already open in Crypto (max 1)"]
+    up = {"only": "BUY", "why": "daily close 31000 above EMA200 28000"}
+    assert dd.order_blocks("NDX100", "SELL", max_per_group=1, regime=up, **kw) == \
+        ["trend filter: buys only (daily close 31000 above EMA200 28000)"]
+    assert dd.order_blocks("NDX100", "BUY", max_per_group=1, regime=up, **kw) == []
+    assert dd.order_blocks("NDX100", "HOLD", max_per_group=1, regime=up, **kw) == []
+    assert dd.order_blocks("NDX100", "BUY", max_per_group=1, regime={"only": None, "why": "no daily bars"}, **kw) == \
+        ["trend filter: no daily bars"]
+
+
+def test_add_blocks_uses_group_cap_from_env(monkeypatch):
+    monkeypatch.setenv("MULTI_MAX_PER_GROUP", "1")
+    mkt = {"symbols": {"BTCUSD": {"group": "Crypto", "readiness": {"decision": "SELL"}},
+                       "ETHUSD": {"group": "Crypto", "readiness": {"decision": "SELL"}, "forming": {"decision": "SELL"}}}}
+    dd.add_blocks(mkt, [{"symbol": "BTCUSD", "type": "SELL"}])
+    assert mkt["symbols"]["ETHUSD"]["blocks"] == ["group limit: BTCUSD already open in Crypto (max 1)"]
+    assert mkt["symbols"]["ETHUSD"]["blocks_forming"] == mkt["symbols"]["ETHUSD"]["blocks"]
+    assert mkt["symbols"]["BTCUSD"]["blocks"] == ["SELL already open (one per pair)"]

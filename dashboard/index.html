@@ -451,8 +451,11 @@ function renderSignalTable() {
   const rows = Object.entries(all).map(([s, d]) => {
     const r = d.readiness || {}, f = d.forming || null;
     const pos = open.find((p) => p.symbol === s);
-    let why = pos ? `${pos.type} already open (one per pair)` : ((entries[s] || {}).reason || entries["*"] || "");
+    // blocks computed by the data layer (one per pair, group cap, daily trend filter); fall back to the trader's own reason
+    const b = d.blocks || [], bf = (d.forming && d.forming.decision !== "HOLD") ? (d.blocks_forming || []) : [];
+    let why = [...new Set([...b, ...bf])].join(" · ") || (entries[s] || {}).reason || entries["*"] || "";
     if (/into the bar > window/.test(why)) why = "";      // normal between entry windows, not a block
+    if (!why && d.regime && d.regime.only) why = `trend filter: ${d.regime.only.toLowerCase()}s only`;
     return { s, r, f, pos, why, err: d.error || r.error };
   });
   $("sigNote").textContent = rows.length ? `last closed candle ${rows[0].r.signal_bar_utc ? new Date(Date.parse(rows[0].r.signal_bar_utc) + 3600e3).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "–"}` : "";
