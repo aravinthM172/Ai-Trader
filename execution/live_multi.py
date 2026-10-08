@@ -116,6 +116,13 @@ def parse_symbol_risk(raw: str) -> dict[str, float]:
 SYMBOL_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_RISK", ""))
 # daily EMA200 trend filter (strategy/regime_filter.py) for these symbols, e.g. MULTI_REGIME_SYMBOLS=XAUUSD; empty = off
 REGIME_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_REGIME_SYMBOLS", ""))
+# per-symbol ceiling on one trade's risk, e.g. MULTI_SYMBOL_MAX_RISK=NDX100=0.004: a min lot above it is skipped.
+# Can only tighten MULTI_MAX_RISK_PER_TRADE (the parser rejects larger values).
+SYMBOL_MAX_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_MAX_RISK", ""))
+
+
+def symbol_max_risk(symbol: str) -> float:
+    return SYMBOL_MAX_RISK.get(symbol, MAX_RISK_PER_TRADE)
 
 
 def symbol_risk(symbol: str) -> float:
@@ -476,7 +483,7 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
         return {**out, "decision": "skip", "reason": vnote, "final": True}
     if vnote != "ok":
         log.warning("%s sizing: %s", s, vnote)
-    vol, risk_usd, note = size_volume(equity=equity, risk_frac=risk, max_risk_frac=MAX_RISK_PER_TRADE,
+    vol, risk_usd, note = size_volume(equity=equity, risk_frac=min(risk, symbol_max_risk(s)), max_risk_frac=symbol_max_risk(s),
                                       sl_dist=sl_d, value_per_unit=vpu,
                                       vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
     if vol <= 0:

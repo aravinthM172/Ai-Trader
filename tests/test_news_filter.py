@@ -19,6 +19,10 @@ def test_symbol_currency_mapping():
     assert symbol_currencies("NAS100.vx") == {"USD"}
     assert symbol_currencies("DAX40.vx") == {"EUR"}
     assert symbol_currencies("GER40") == {"EUR"}           # FundingPips name
+    assert symbol_currencies("NDX100") == {"USD"}
+    assert symbol_currencies("JP225") == {"JPY"}
+    assert symbol_currencies("FTSE100") == {"GBP"}
+    assert symbol_currencies("USDJPY") == {"USD", "JPY"}
     assert symbol_currencies("XAUUSD.vx") == {"USD"}
     assert symbol_currencies("BTCUSD.vx") == {"USD"}
     assert symbol_currencies("GBPJPY.vx") == {"GBP", "JPY"}

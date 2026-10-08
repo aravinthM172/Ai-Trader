@@ -261,3 +261,19 @@ def test_regime_filter_off_for_unlisted_symbols(monkeypatch):
 def test_regime_filter_without_daily_data_retries(monkeypatch):
     res = _regime_call(monkeypatch, None, {"XAUUSD"})
     assert res["decision"] == "retry" and not res.get("final")
+
+
+# ---- per-symbol risk ceiling (MULTI_SYMBOL_MAX_RISK) ------------------------------------
+def test_symbol_max_risk_only_tightens(monkeypatch):
+    monkeypatch.setattr(lm, "SYMBOL_MAX_RISK", lm.parse_symbol_risk("NDX100=0.004, XAUUSD=0.5"))
+    assert lm.symbol_max_risk("NDX100") == 0.004
+    assert lm.symbol_max_risk("XAUUSD") == lm.MAX_RISK_PER_TRADE      # 0.5 > global ceiling -> rejected
+    assert lm.symbol_max_risk("BTCUSD") == lm.MAX_RISK_PER_TRADE
+
+
+def test_symbol_cap_skips_oversized_min_lot(monkeypatch):
+    # $5k, NAS stop 120 pts x $20/pt/lot: 0.01 lot = $24 = 0.48 % -> skipped under a 0.4 % cap, taken under 1 %
+    monkeypatch.setattr(lm, "SYMBOL_MAX_RISK", {"NDX100": 0.004})
+    kw = dict(equity=5000, risk_frac=0.0025, sl_dist=120, value_per_unit=20, vmin=0.01, vstep=0.01, vmax=50)
+    assert lm.size_volume(max_risk_frac=lm.symbol_max_risk("NDX100"), **kw)[0] == 0
+    assert lm.size_volume(max_risk_frac=lm.symbol_max_risk("XAUUSD"), **kw)[0] == 0.01

@@ -34,7 +34,9 @@ REFRESH_HOURS = 6
 STALE_HOURS = 24 * 7
 
 _INDEX_CCY = {"NAS100": "USD", "SP500": "USD", "US30": "USD", "DXY": "USD", "DAX40": "EUR", "EU50": "EUR",
-              "GER40": "EUR", "DE40": "EUR", "FRA40": "EUR", "UK100": "GBP", "JPN225": "JPY", "AUS200": "AUD", "HK50": "CNY"}
+              "GER40": "EUR", "DE40": "EUR", "FRA40": "EUR", "UK100": "GBP", "JPN225": "JPY", "AUS200": "AUD", "HK50": "CNY",
+              # FundingPips names
+              "NDX100": "USD", "SPX500": "USD", "DJI30": "USD", "JP225": "JPY", "FTSE100": "GBP", "STX50": "EUR"}
 _CCYS = {"USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "CNY"}
 
 
