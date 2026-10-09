@@ -306,16 +306,19 @@ def _ensure_sl(gw, spec, p, sl, tp, c) -> bool:
 
 
 def _sync_closed(gw, c, magics: set[int]) -> None:
+    """Mark the bot's OPEN trades CLOSED from MT5's closing deals.  Matched by position ticket, not by the deal's
+    magic: a trade closed by hand in MT5 (or on the phone) gets a closing deal with magic 0."""
     mt5 = gw.raw()
     now = datetime.now(timezone.utc)
     for d in mt5.history_deals_get(now - timedelta(days=45), now + timedelta(days=1)) or []:
-        if int(d.magic) not in magics or int(d.entry) not in (1, 3):
+        if int(d.entry) not in (1, 3):
             continue
         row = c.execute("SELECT status, risk_usd FROM trades WHERE ticket=?", (int(d.position_id),)).fetchone()
         if not row or row[0] != "OPEN":
             continue
         pnl = float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
-        reason = {4: "stop", 5: "target"}.get(int(getattr(d, "reason", -1)), "manual/time")
+        reason = {4: "stop", 5: "target"}.get(int(getattr(d, "reason", -1)),
+                                              "manual/time" if int(d.magic) in magics else "manual")
         r_mult = pnl / row[1] if row[1] else None
         c.execute("""UPDATE trades SET status='CLOSED', closed_utc=?, exit=?, exit_reason=?, pnl_usd=?, r_multiple=?
                      WHERE ticket=?""", (gw.to_utc(int(d.time)).isoformat(), float(d.price), reason, round(pnl, 2),

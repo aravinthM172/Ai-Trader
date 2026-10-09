@@ -313,3 +313,53 @@ def test_long_only_lets_buy_through(monkeypatch):
 def test_long_only_off_for_unlisted_symbols(monkeypatch):
     res = _side_call(monkeypatch, "SELL", {"USDJPY"})
     assert "news" in res.get("reason", "")
+
+
+# ---- trades closed outside the bot -----------------------------------------------------------
+from types import SimpleNamespace as _NS
+
+
+class _DealGW:
+    def __init__(self, deals):
+        self.deals = deals
+
+    def raw(self):
+        return _NS(history_deals_get=lambda *a: self.deals)
+
+    def to_utc(self, t):
+        return datetime.fromtimestamp(t, timezone.utc)
+
+
+def _open_trade(c, ticket, risk=10.0):
+    c.execute("INSERT INTO trades(ticket, symbol, status, risk_usd) VALUES(?, 'BTCUSD', 'OPEN', ?)", (ticket, risk))
+    c.commit()
+
+
+def _deal(ticket, magic, reason, profit):
+    return _NS(position_id=ticket, magic=magic, entry=1, reason=reason, profit=profit, commission=0.0, swap=0.0,
+               fee=0.0, price=100.0, time=1_791_500_000, symbol="BTCUSD")
+
+
+def test_sync_closed_records_hand_closed_trade(tmp_path):
+    """MT5 gives a trade closed by hand a closing deal with magic 0 -- it must still be marked CLOSED."""
+    c = lm._conn(tmp_path / "t.sqlite")
+    _open_trade(c, 7)
+    lm._sync_closed(_DealGW([_deal(7, 0, 0, -6.93)]), c, {26118201})
+    assert c.execute("SELECT status, exit_reason, pnl_usd, r_multiple FROM trades WHERE ticket=7").fetchone() == \
+        ("CLOSED", "manual", -6.93, -0.693)
+
+
+def test_sync_closed_keeps_stop_and_target_labels(tmp_path):
+    c = lm._conn(tmp_path / "t.sqlite")
+    _open_trade(c, 8)
+    _open_trade(c, 9)
+    lm._sync_closed(_DealGW([_deal(8, 26118201, 4, -10.0), _deal(9, 26118201, 5, 30.0)]), c, {26118201})
+    assert dict(c.execute("SELECT ticket, exit_reason FROM trades")) == {8: "stop", 9: "target"}
+
+
+def test_sync_closed_ignores_deals_of_other_positions(tmp_path):
+    """A hand trade the bot never opened has no row, so nothing is written."""
+    c = lm._conn(tmp_path / "t.sqlite")
+    _open_trade(c, 7)
+    lm._sync_closed(_DealGW([_deal(99, 0, 0, 50.0)]), c, {26118201})
+    assert c.execute("SELECT COUNT(*) FROM trades WHERE status='CLOSED'").fetchone()[0] == 0
