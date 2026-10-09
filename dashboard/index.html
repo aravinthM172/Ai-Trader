@@ -218,6 +218,10 @@ button.theme { margin-left: auto; }
 <script>
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// all times in the viewer's local time zone (IST in India), 12-hour clock
+const T12 = {hour: "numeric", minute: "2-digit", hour12: true};
+const tm = (v) => new Date(v).toLocaleTimeString([], T12);
+const dtm = (v) => new Date(v).toLocaleString([], {day: "numeric", month: "short", ...T12});
 const fmt = (n, d = 2) => (n === null || n === undefined || isNaN(n)) ? "–" : Number(n).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
 const money = (n) => (n === null || n === undefined) ? "–" : "$" + fmt(n);
 const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag);
@@ -254,7 +258,9 @@ $("themeBtn").onclick = theme;
 function chartOpts(h) {
   return { height: h, layout: { background: { color: css("--surface") }, textColor: css("--text-secondary"), fontSize: 11 },
     grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
-    rightPriceScale: { borderColor: css("--border") }, timeScale: { borderColor: css("--border"), timeVisible: true },
+    rightPriceScale: { borderColor: css("--border") }, timeScale: { borderColor: css("--border"), timeVisible: true,
+      tickMarkFormatter: (t, type) => type < 3 ? new Date(t * 1000).toLocaleDateString([], {day: "numeric", month: "short"}) : tm(t * 1000) },
+    localization: { timeFormatter: (t) => dtm(t * 1000) },
     crosshair: { mode: 0 } };
 }
 function buildCharts() {
@@ -310,7 +316,7 @@ function renderBotStatus() {
   const [lvl, word, why] = botStatus(S), a = (S.market || {}).account || {};
   const b = $("botState"); b.className = "bot-state s-" + lvl; b.textContent = word;
   const acct = a.login ? ` · account ${a.login} (${[a.server, (a.type || "").toUpperCase()].filter(Boolean).join(", ")})` : "";
-  const when = S.received_utc ? ` · as of ${new Date(S.received_utc).toLocaleTimeString()}` : "";
+  const when = S.received_utc ? ` · as of ${tm(S.received_utc)}` : "";
   $("botWhy").textContent = why + acct + when;
 }
 
@@ -331,7 +337,7 @@ function renderHeader() {
   if (S.kill_switch) c.append(chip("critical", "KILL SWITCH"));
   const w = S.entry_window || {};
   c.append(el("span", {class: "chip"}, w.open_now ? "entry window open" : `next entry window in ${fmt(w.in_min, 0)} min`));
-  $("updated").textContent = S.received_utc ? `updated ${new Date(S.received_utc).toLocaleString()}` : "";
+  $("updated").textContent = S.received_utc ? `updated ${dtm(S.received_utc)}` : "";
 }
 
 function tile(label, value, sub, pct) {
@@ -473,7 +479,7 @@ function renderNext() {
   if (r.error || d.error) { N.append(el("div", {class: "muted"}, r.error || d.error)); return; }
   const fired = r.decision !== "HOLD";
   N.append(el("div", {style: "font-size:20px;font-weight:600"}, `${sym.replace(".vx", "")}: ${fired ? r.decision + " signal" : "no signal"}`));
-  N.append(el("div", {class: "small muted"}, `from bar ${new Date(r.signal_bar_utc).toLocaleString()} · closest side ${r.closest_side} (${r.met}/3 conditions)`));
+  N.append(el("div", {class: "small muted"}, `from bar ${dtm(r.signal_bar_utc)} · closest side ${r.closest_side} (${r.met}/3 conditions)`));
   const names = { rsi: `RSI14 ${r.closest_side === "BUY" ? "≥ 60" : "≤ 40"} (now ${fmt(r.rsi, 1)})`,
     momentum: `8-bar momentum ${r.closest_side === "BUY" ? "up" : "down"}`, trend: `price ${r.closest_side === "BUY" ? "above" : "below"} EMA96` };
   for (const [k, ok] of Object.entries(r.conditions || {}))
@@ -535,7 +541,7 @@ function renderSignalTable() {
     if (!why && d.regime && d.regime.only) why = `trend filter: ${d.regime.only.toLowerCase()}s only`;
     return { s, r, f, pos, why, nx: d.next, err: d.error || r.error };
   });
-  $("sigNote").textContent = rows.length ? `last closed candle ${rows[0].r.signal_bar_utc ? new Date(Date.parse(rows[0].r.signal_bar_utc) + 3600e3).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "–"}` : "";
+  $("sigNote").textContent = rows.length ? `last closed candle ${rows[0].r.signal_bar_utc ? tm(Date.parse(rows[0].r.signal_bar_utc) + 3600e3) : "–"}` : "";
   $("sigtable").replaceChildren(table(rows, [
     ["s", "Pair", (v, r) => el("strong", {}, short(v))],
     ["r", "Close", (v) => px(v.close), 1],
@@ -559,7 +565,7 @@ function renderCountdown() {
   const into = now.getTime() % 3600e3;
   const open = into <= 15 * 60e3;
   const left = Math.max(0, next - now), m = Math.floor(left / 60e3), sec = Math.floor(left / 1e3) % 60;
-  const hhmm = (d) => d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const hhmm = tm;
   const t = open ? `checking now (until ${hhmm(new Date(next - 45 * 60e3))}) · next check ${hhmm(next)}`
                  : `next check ${hhmm(next)} (in ${m} min ${String(sec).padStart(2, "0")} s)`;
   const e = $("sigCountdown"); if (e) e.textContent = t;
@@ -581,15 +587,15 @@ function renderTables() {
   const net = closed.reduce((a, t) => a + (Number(t.pnl_usd) || 0), 0);
   $("tradesSummary").textContent = `${closed.length} closed · ${n("TP hit")} TP hit · ${n("SL hit")} SL hit · ${n("closed")} closed early · net ${plText(net)}`;
   const tr = [...all].reverse().slice(0, 30);
-  $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? new Date(v).toLocaleString() : "–"],
-    ["closed_utc", "Closed", (v) => v ? new Date(v).toLocaleString() : "–"], ["symbol", "Symbol", short],
+  $("trades").replaceChildren(table(tr, [["opened_utc", "Opened", (v) => v ? dtm(v) : "–"],
+    ["closed_utc", "Closed", (v) => v ? dtm(v) : "–"], ["symbol", "Symbol", short],
     ["direction", "Side"], ["volume", "Lots", null, 1], ["entry", "Entry", px, 1],
     ["sl", "Stop loss", (v) => el("span", {class: "pl-neg"}, px(v)), 1], ["tp", "Take profit", (v) => el("span", {class: "pl-pos"}, px(v)), 1],
     ["exit", "Exit price", px, 1], ["exit_reason", "Result", (v, r) => resultChip(r)],
     ["pnl_usd", "P/L", (v) => v === null || v === undefined ? "open" : plSpan(v), 1], ["r_multiple", "R", (v) => rSpan(v), 1]]));
   const news = S.news || [];
   $("news").replaceChildren(news.length ? el("ul", {class: "list"}, ...news.map((n) =>
-    el("li", {}, `${new Date(n.time_utc).toLocaleString()} · ${n.currency} · ${n.event}`))) : el("div", {class: "muted"}, "no high-impact events"));
+    el("li", {}, `${dtm(n.time_utc)} · ${n.currency} · ${n.event}`))) : el("div", {class: "muted"}, "no high-impact events"));
   const e = S.edge;
   $("edge").replaceChildren(!e ? el("div", {class: "muted"}, "no reference yet") : el("div", {},
     e.retire ? chip("critical", "edge monitor: RETIRE") : chip("good", "edge OK"),
