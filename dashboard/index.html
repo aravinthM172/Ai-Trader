@@ -160,7 +160,8 @@ button.theme { margin-left: auto; }
   </section>
 
   <section class="card" style="margin-top:12px" aria-label="Signal check">
-    <h2>Signal check · all pairs <span class="small muted" id="sigNote" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+    <h2>Signal check · all pairs <span class="small muted" id="sigNote" style="text-transform:none;letter-spacing:0;margin-left:8px"></span>
+      <span class="small" id="sigCountdown" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
     <div class="scroll" id="sigtable"></div>
     <div class="small muted" style="margin-top:6px">
       BUY needs all 3: RSI14 ≥ 60 · price up over 8 bars · close above EMA96. SELL needs all 3: RSI14 ≤ 40 · down over 8 bars · below EMA96.
@@ -532,7 +533,7 @@ function renderSignalTable() {
     let why = [...new Set([...b, ...bf])].join(" · ") || (entries[s] || {}).reason || entries["*"] || "";
     if (/into the bar > window/.test(why)) why = "";      // normal between entry windows, not a block
     if (!why && d.regime && d.regime.only) why = `trend filter: ${d.regime.only.toLowerCase()}s only`;
-    return { s, r, f, pos, why, err: d.error || r.error };
+    return { s, r, f, pos, why, nx: d.next, err: d.error || r.error };
   });
   $("sigNote").textContent = rows.length ? `last closed candle ${rows[0].r.signal_bar_utc ? new Date(Date.parse(rows[0].r.signal_bar_utc) + 3600e3).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "–"}` : "";
   $("sigtable").replaceChildren(table(rows, [
@@ -546,7 +547,22 @@ function renderSignalTable() {
     ["r", "Bot decision", (v, r) => r.err ? chip("critical", r.err) : dchip(v.decision)],
     ["f", "If the hour closed now", (v) => !v ? "–" : el("span", {}, dchip(v.decision), el("span", {class: "small muted"}, ` RSI ${fmt(v.rsi, 1)} · buy ${n(v.buy)}/3 · sell ${n(v.sell)}/3`))],
     ["why", "Would block an order", (v) => v ? el("span", {class: "small", style: "white-space:normal"}, v) : el("span", {class: "small muted"}, "nothing")],
+    ["nx", "Next trade: side · still needed", (v) => !v ? "–" : el("span", {class: "small", style: "white-space:normal"},
+      v.side ? dchip(v.side) : "", " ", v.status || "")],
   ]));
+  renderCountdown();
+}
+// time until the bot's next hourly check (the first 15 min after each H1 candle closes)
+function renderCountdown() {
+  const now = new Date();
+  const next = new Date(Math.floor(now.getTime() / 3600e3) * 3600e3 + 3600e3);
+  const into = now.getTime() % 3600e3;
+  const open = into <= 15 * 60e3;
+  const left = Math.max(0, next - now), m = Math.floor(left / 60e3), sec = Math.floor(left / 1e3) % 60;
+  const hhmm = (d) => d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const t = open ? `checking now (until ${hhmm(new Date(next - 45 * 60e3))}) · next check ${hhmm(next)}`
+                 : `next check ${hhmm(next)} (in ${m} min ${String(sec).padStart(2, "0")} s)`;
+  const e = $("sigCountdown"); if (e) e.textContent = t;
 }
 function resultChip(t) {
   const lab = exitLabel(t);
@@ -716,7 +732,7 @@ for (const id of ["strengthBox", "rulesBox", "alertsBox"]) {
   try { if (localStorage.getItem("open-" + id) === "1") $(id).open = true; } catch (e) {}
   $(id).addEventListener("toggle", () => { try { localStorage.setItem("open-" + id, $(id).open ? "1" : "0"); } catch (e) {} });
 }
-buildCharts(); load(); setInterval(load, 30000); setInterval(loadTick, 2000);
+buildCharts(); load(); setInterval(load, 30000); setInterval(loadTick, 2000); setInterval(renderCountdown, 1000);
 </script>
 </body>
 </html>

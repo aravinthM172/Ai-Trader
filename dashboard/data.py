@@ -59,6 +59,18 @@ def _rows(db: Path, sql: str, args=()) -> list[dict]:
 
 
 # -- signal readiness (pure, tested) -------------------------------------------------
+def _needs(side: str, conds: dict, rsi: float, mom: float, ema: float, close: float) -> list[str]:
+    """The conditions still missing for `side`, in words."""
+    need = []
+    if not conds["rsi"]:
+        need.append(f"RSI {'≥' if side == 'BUY' else '≤'} {PARAMS['rsi_buy'] if side == 'BUY' else PARAMS['rsi_sell']:.0f} (now {rsi:.1f})")
+    if not conds["momentum"]:
+        need.append(f"8-bar momentum {'up' if side == 'BUY' else 'down'} (now {mom:+.5g})")
+    if not conds["trend"]:
+        need.append(f"close {'above' if side == 'BUY' else 'below'} EMA{PARAMS['ema_htf'] * 4} {ema:.5g} (now {close:.5g})")
+    return need
+
+
 def signal_readiness(df: pd.DataFrame) -> dict:
     """What the frozen rule says about the NEXT H1 bar, from COMPLETED bars only.
 
@@ -79,19 +91,13 @@ def signal_readiness(df: pd.DataFrame) -> dict:
     # which side is closer to triggering
     side = "BUY" if sum(buy.values()) >= sum(sell.values()) else "SELL"
     conds = buy if side == "BUY" else sell
-    need = []
-    if not conds["rsi"]:
-        need.append(f"RSI {'≥' if side == 'BUY' else '≤'} {PARAMS['rsi_buy'] if side == 'BUY' else PARAMS['rsi_sell']:.0f} (now {rsi:.1f})")
-    if not conds["momentum"]:
-        need.append(f"8-bar momentum {'up' if side == 'BUY' else 'down'} (now {mom:+.5g})")
-    if not conds["trend"]:
-        need.append(f"close {'above' if side == 'BUY' else 'below'} EMA{PARAMS['ema_htf'] * 4} {ema:.5g} (now {close:.5g})")
+    needs = {"BUY": _needs("BUY", buy, rsi, mom, ema, close), "SELL": _needs("SELL", sell, rsi, mom, ema, close)}
     plan = None
     if atr > 0:
         d = 1 if side == "BUY" else -1
         plan = {"side": side, "entry": close, "sl": close - d * SL_ATR * atr, "tp": close + d * TP_ATR * atr}
     return {"decision": decision, "closest_side": side, "conditions": conds, "met": sum(conds.values()),
-            "missing": need, "rsi": round(rsi, 1), "momentum": mom, "ema": ema, "atr": atr, "close": close,
+            "missing": needs[side], "needs": needs, "rsi": round(rsi, 1), "momentum": mom, "ema": ema, "atr": atr, "close": close,
             "buy": buy, "sell": sell, "signal_bar_utc": str(df["time"].iloc[-1]), "plan": plan}
 
 
@@ -106,7 +112,7 @@ def forming_preview(df_all: pd.DataFrame, now: datetime) -> dict | None:
 
 
 def order_blocks(symbol: str, decision: str | None, *, open_positions: list[dict], groups: dict,
-                 max_per_group: int, regime: dict | None) -> list[str]:
+                 max_per_group: int, regime: dict | None, long_only: bool = False) -> list[str]:
     """Why the trader would not place `decision` (BUY / SELL) on `symbol` right now -- the same
     checks as execution/live_multi.py: one position per pair, the per-group cap and the daily
     EMA200 trend filter.  Empty list = nothing blocks it."""
@@ -124,6 +130,48 @@ def order_blocks(symbol: str, decision: str | None, *, open_positions: list[dict
             out.append(f"trend filter: {regime.get('why', 'no daily data')}")
         elif decision in ("BUY", "SELL") and decision != only:
             out.append(f"trend filter: {only.lower()}s only ({regime.get('why')})")
+    if long_only and decision == "SELL":
+        out.append("buy-only symbol (MULTI_LONG_ONLY_SYMBOLS)")
+    return out
+
+
+MARKET_CLOSED_S = 900          # no new price for 15 min = market closed (weekend, daily break, holiday)
+
+
+def next_trade(symbol: str, d: dict, *, now: datetime, open_positions: list[dict], groups: dict,
+               max_per_group: int, long_only: bool) -> dict:
+    """When the bot next looks at `symbol`, which side it may take and what is still missing for it.
+    The bot decides once per hour on the candle that just closed (first 15 min of the hour)."""
+    nxt = pd.Timestamp(now).floor("1h") + pd.Timedelta(hours=1)
+    out = {"next_check_utc": nxt.isoformat(), "side": None, "needs": [], "waiting": []}
+    r = d.get("readiness") or {}
+    if d.get("error") or r.get("error"):
+        out["status"] = d.get("error") or r.get("error")
+        return out
+    sides = ["BUY"] if long_only else ["BUY", "SELL"]
+    only = (d.get("regime") or {}).get("only", "") if d.get("regime") else ""
+    if d.get("regime") and only is None:
+        out["status"] = f"trend filter has no daily data ({d['regime'].get('why')})"
+        return out
+    if only:
+        sides = [x for x in sides if x == only]
+    if not sides:
+        out["status"] = "no side allowed (buy-only symbol, daily trend down)"
+        return out
+    met = {x: sum((r.get(x.lower()) or {}).values()) for x in sides}
+    side = r["decision"] if r.get("decision") in sides else max(sides, key=lambda x: met[x])
+    kw = dict(open_positions=open_positions, groups=groups, max_per_group=max_per_group, regime=None)
+    out.update(side=side, needs=(r.get("needs") or {}).get(side, []), met=met[side],
+               waiting=order_blocks(symbol, side, **kw))
+    age = d.get("tick_age_s")
+    if age is not None and age > MARKET_CLOSED_S:
+        out["status"] = "market closed -- checks resume on the first full hour after it reopens"
+    elif r.get("decision") == side and not out["waiting"]:
+        out["status"] = f"{side} signal on the last candle"
+    elif out["waiting"]:
+        out["status"] = "waiting: " + "; ".join(out["waiting"])
+    else:
+        out["status"] = f"{side} needs " + "; ".join(out["needs"])
     return out
 
 
@@ -358,14 +406,19 @@ def symbol_strength(trades: list[dict], top: int = 12) -> list[dict]:
 
 
 def add_blocks(mkt: dict, open_positions: list[dict]) -> None:
-    """Attach `blocks` (closed-bar signal) and `blocks_forming` to every symbol in a market() result."""
+    """Attach `blocks` (closed-bar signal), `blocks_forming` and `next` (next check) to every symbol in a market() result."""
     syms = mkt.get("symbols") or {}
     groups = {s: d.get("group", "") for s, d in syms.items()}
     cap = int(float(os.getenv("MULTI_MAX_PER_GROUP", 2)))
+    long_only = regime_filter.parse_symbols(os.getenv("MULTI_LONG_ONLY_SYMBOLS", ""))
+    now = datetime.now(timezone.utc)
     for s, d in syms.items():
-        kw = dict(open_positions=open_positions, groups=groups, max_per_group=cap, regime=d.get("regime"))
+        kw = dict(open_positions=open_positions, groups=groups, max_per_group=cap, regime=d.get("regime"),
+                  long_only=s in long_only)
         d["blocks"] = order_blocks(s, (d.get("readiness") or {}).get("decision"), **kw)
         d["blocks_forming"] = order_blocks(s, (d.get("forming") or {}).get("decision"), **kw)
+        d["next"] = next_trade(s, d, now=now, open_positions=open_positions, groups=groups, max_per_group=cap,
+                               long_only=s in long_only)
 
 
 def gather() -> dict:

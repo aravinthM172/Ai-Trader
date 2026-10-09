@@ -414,3 +414,47 @@ def test_account_switch_wrong_size_is_undone(tmp_path):
     assert fake.acct.login == 111 and env.read_text() == "LIVE_ACCOUNT_MODE=demo\n"
     assert (tmp_path / "multi_live.sqlite").read_text() == "old" and not (tmp_path / "challenge_state.json").exists()
     assert calls == ["stop", "start"]
+
+
+# ---- next trade: side allowed, what is missing, when the bot looks next ---------------------------------
+def _ready(decision="HOLD", buy=(True, True, False), sell=(False, False, True)):
+    k = ("rsi", "momentum", "trend")
+    return {"decision": decision, "buy": dict(zip(k, buy)), "sell": dict(zip(k, sell)),
+            "needs": {"BUY": ["close above EMA96 83470 (now 83243)"], "SELL": ["RSI ≤ 40 (now 63.8)", "8-bar momentum down"]}}
+
+
+NOW_NT = datetime(2026, 10, 9, 12, 25, tzinfo=timezone.utc)
+NT_KW = dict(now=NOW_NT, open_positions=[], groups={"BTCUSD": "Crypto", "ETHUSD": "Crypto"}, max_per_group=1)
+
+
+def test_next_trade_closest_side_and_next_hour():
+    n = dd.next_trade("BTCUSD", {"readiness": _ready(), "tick_age_s": 1}, long_only=False, **NT_KW)
+    assert n["side"] == "BUY" and n["next_check_utc"].startswith("2026-10-09T13:00")
+    assert n["status"] == "BUY needs close above EMA96 83470 (now 83243)"
+
+
+def test_next_trade_respects_buy_only_and_trend_filter():
+    sell_close = _ready(buy=(False, False, False), sell=(True, True, False))
+    n = dd.next_trade("NDX100", {"readiness": sell_close, "tick_age_s": 1}, long_only=True, **NT_KW)
+    assert n["side"] == "BUY"                               # SELL is closer but the symbol is buy-only
+    n = dd.next_trade("XAUUSD", {"readiness": _ready(), "tick_age_s": 1, "regime": {"only": "SELL", "why": "down"}},
+                      long_only=False, **NT_KW)
+    assert n["side"] == "SELL" and "RSI ≤ 40" in n["status"]
+    n = dd.next_trade("USDJPY", {"readiness": _ready(), "tick_age_s": 1, "regime": {"only": "SELL", "why": "down"}},
+                      long_only=True, **NT_KW)
+    assert n["side"] is None and "no side allowed" in n["status"]
+
+
+def test_next_trade_waits_for_group_and_closed_market():
+    pos = [{"symbol": "BTCUSD", "type": "BUY"}]
+    n = dd.next_trade("ETHUSD", {"readiness": _ready(), "tick_age_s": 1}, long_only=False,
+                      **{**NT_KW, "open_positions": pos})
+    assert n["status"].startswith("waiting: group limit: BTCUSD")
+    n = dd.next_trade("XAUUSD", {"readiness": _ready(), "tick_age_s": 7200}, long_only=False, **NT_KW)
+    assert n["status"].startswith("market closed")
+
+
+def test_order_blocks_buy_only():
+    kw = dict(open_positions=[], groups={}, max_per_group=1, regime=None)
+    assert dd.order_blocks("NDX100", "SELL", long_only=True, **kw) == ["buy-only symbol (MULTI_LONG_ONLY_SYMBOLS)"]
+    assert dd.order_blocks("NDX100", "BUY", long_only=True, **kw) == []
