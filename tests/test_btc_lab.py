@@ -84,3 +84,40 @@ def test_monte_carlo_shape(px):
     r = lab.run_backtest(p, atr, entries, wu + 5, len(c), wu, lab.Costs(), lab.RiskCfg())
     mc = lab.monte_carlo(r["trades"], lab.RiskCfg(), n=200)
     assert "n_trials" in mc or "note" in mc
+
+
+_RISK = lab.RiskCfg(initial_balance=5000.0, risk_per_trade=0.01, max_risk_per_trade=0.02)
+
+
+def _flat(n=400, px=50_000.0):
+    o = np.full(n, px); h = o + 10; l = o - 10; c = o.copy()
+    return {"open": o, "high": h, "low": l, "close": c}
+
+
+def test_no_reentry_on_the_bar_a_trade_closed_inside():
+    """Regression (2026-10-07): a trade that hits its target INSIDE bar i was still open at open[i];
+    live trades one position per symbol, so no new trade may open at open[i]."""
+    p = _flat()
+    n = len(p["open"])
+    atr = np.full(n, 100.0)
+    entries = np.zeros(n, np.int8)
+    entries[300] = 1
+    entries[310] = 1                                  # signal on the bar where trade 1 exits
+    p["high"][310] = p["open"][310] + 2000            # target hit inside bar 310
+    r = lab.run_backtest(p, atr, entries, 260, n, 250, lab.Costs(), _RISK)
+    tr = r["trades"]
+    assert list(tr["entry_i"]) == [300] and list(tr["exit_i"]) == [310]
+
+
+def test_reentry_allowed_when_previous_closed_at_the_open():
+    """A gap through the stop exits AT open[i] -- the slot is free, as live."""
+    p = _flat()
+    n = len(p["open"])
+    atr = np.full(n, 100.0)
+    entries = np.zeros(n, np.int8)
+    entries[300] = 1
+    entries[310] = 1
+    for k in ("open", "high", "low", "close"):
+        p[k][310:] -= 1000                            # gap down through the stop at bar 310's open
+    r = lab.run_backtest(p, atr, entries, 260, n, 250, lab.Costs(), _RISK)
+    assert list(r["trades"]["entry_i"]) == [300, 310]

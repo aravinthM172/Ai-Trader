@@ -32,4 +32,4 @@ def test_next_action_text():
 def test_sleeves_only_use_round3_strategies():
     for members in pdly.SLEEVES.values():
         for st, sym in members:
-            assert st in r3.STRATEGIES and sym.endswith(".vx")
+            assert st in r3.STRATEGIES and not sym.endswith(".vx")

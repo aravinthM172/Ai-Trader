@@ -262,3 +262,293 @@ tested_utc,name,params,lookahead_ok,btc_exp_R,btc_wf,bitstamp_exp_R,bitstamp_t,x
 2026-10-06T09:24:26+00:00,r3_crabel_nr7_pooled,"{""symbols"": 45, ""tf"": ""D1""}",True,,,,,,0.094,276,0.0,False,False
 2026-10-06T09:24:26+00:00,r3_turn_of_month_pooled,"{""symbols"": 10, ""tf"": ""D1""}",True,,,,,,0.022,276,0.149,False,False
 2026-10-06T10:16:34+00:00,r3_connors_rsi2_unseen_1985_2004,"{""symbols"": 9, ""tf"": ""D1"", ""rule"": ""pooled mean R > 0 and t > 2""}",True,,,,,,-0.019,277,,True,True
+2026-10-07T07:15:46+00:00,r4_dxy_filter_live_xau,"{""sma"": 50}",True,,,,,0.0956,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""XAUUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.381,396,0.004,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""EURUSD.vx"", ""tf"": ""D1""}",True,,,,,,-0.083,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""GBPUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.052,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""AUDUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.134,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""NZDUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.031,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""USDCAD.vx"", ""tf"": ""D1""}",True,,,,,,-0.028,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""USDCHF.vx"", ""tf"": ""D1""}",True,,,,,,-0.12,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55,"{""symbol"": ""USDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.006,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""XAUUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""EURUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.012,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""GBPUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""AUDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.003,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""NZDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""USDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.004,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""USDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend,"{""symbol"": ""USDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.005,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""EURUSD.vx/GBPUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.109,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""AUDUSD.vx/NZDUSD.vx"", ""tf"": ""D1""}",True,,,,,,0.048,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""EURJPY.vx/GBPJPY.vx"", ""tf"": ""D1""}",True,,,,,,-0.112,396,0.098,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""AUDJPY.vx/NZDJPY.vx"", ""tf"": ""D1""}",True,,,,,,0.013,396,0.004,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""EURUSD.vx/USDCHF.vx"", ""tf"": ""D1""}",True,,,,,,-0.02,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""NAS100.vx/SP500.vx"", ""tf"": ""D1""}",True,,,,,,-0.086,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""US30.vx/SP500.vx"", ""tf"": ""D1""}",True,,,,,,0.106,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""DAX40.vx/EU50.vx"", ""tf"": ""D1""}",True,,,,,,0.028,396,0.003,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs,"{""symbol"": ""BTCUSD.vx/ETHUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.003,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.009,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.005,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUDNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.185,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""AUS200.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""BTCUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""CADCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""CADJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""CHFJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""DAX40.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""ETHUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.028,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EU50.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURAUD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.035,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURGBP.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.062,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.003,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""EURUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""FRA40.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPAUD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.036,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""GBPUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""HK50.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.192,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""JPN225.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""NAS100.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""NZDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.002,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""NZDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""NZDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.027,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""NZDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""SP500.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.021,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""UK100.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""US30.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""USDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.011,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""USDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""USDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.184,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""XAUUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.023,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""XBRUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""XNGUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom,"{""symbol"": ""XTIUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUDNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""AUS200.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""BTCUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""CADCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""CADJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""CHFJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""DAX40.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""ETHUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EU50.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURAUD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURGBP.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""EURUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""FRA40.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPAUD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPNZD.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""GBPUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""HK50.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""JPN225.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""NAS100.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""NZDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""NZDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""NZDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""NZDUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""SP500.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""UK100.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""US30.vx"", ""tf"": ""D1""}",True,,,,,,,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""USDCAD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""USDCHF.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""USDJPY.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""XAUUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""XBRUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""XNGUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders,"{""symbol"": ""XTIUSD.vx"", ""tf"": ""D1""}",True,,,,,,,396,,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_turtle55_pooled,"{""members"": 8}",True,,,,,,0.098,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_A2_dxy_clenow_trend_pooled,"{""members"": 8}",True,,,,,,-0.065,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_B_pairs_pooled,"{""members"": 9}",True,,,,,,0.022,396,0.001,False,False
+2026-10-07T07:15:46+00:00,r4_C_double_top_bottom_pooled,"{""members"": 44}",True,,,,,,0.04,396,0.0,False,False
+2026-10-07T07:15:46+00:00,r4_C_head_shoulders_pooled,"{""members"": 44}",True,,,,,,0.066,396,0.0,False,False
+2026-10-07T07:31:43+00:00,chop_adx25_tp3,"{""filter"": ""adx25|tp3""}",True,,,0.0695,,0.0627,,402,,False,False
+2026-10-07T07:31:43+00:00,chop_chop618_tp3,"{""filter"": ""chop618|tp3""}",True,,,0.1354,,0.0769,,402,,False,False
+2026-10-07T07:31:43+00:00,chop_er030_tp3,"{""filter"": ""er030|tp3""}",True,,,0.1673,,0.1065,,402,,False,False
+2026-10-07T07:31:43+00:00,chop_adx25_tp6,"{""filter"": ""adx25|tp6""}",True,,,0.2139,,0.1777,,402,,False,False
+2026-10-07T07:31:43+00:00,chop_chop618_tp6,"{""filter"": ""chop618|tp6""}",True,,,0.2744,,0.1614,,402,,False,False
+2026-10-07T07:31:43+00:00,chop_er030_tp6,"{""filter"": ""er030|tp6""}",True,,,0.2363,,0.2628,,402,,False,False
+2026-10-07T07:56:02+00:00,reassess_XAUUSD_tp3,"{""source"": ""broker"", ""span"": ""2010-01-03..2026-10-02""}",True,,,,,0.0647,,410,0.736,False,False
+2026-10-07T07:56:02+00:00,reassess_XAUUSD_tp6,"{""source"": ""broker"", ""span"": ""2010-01-03..2026-10-02""}",True,,,,,0.1499,,410,0.944,False,False
+2026-10-07T07:56:02+00:00,reassess_BTCUSD_tp3,"{""source"": ""Bitstamp"", ""span"": ""2014-01-01..2026-09-26""}",True,,,,,,,410,0.543,False,False
+2026-10-07T07:56:02+00:00,reassess_BTCUSD_tp6,"{""source"": ""Bitstamp"", ""span"": ""2014-01-01..2026-09-26""}",True,,,,,,,410,0.987,True,True
+2026-10-07T07:56:02+00:00,reassess_GER40_tp3,"{""source"": ""Dukascopy"", ""span"": ""2014-01-01..2026-09-30""}",True,,,,,,,410,0.0,False,False
+2026-10-07T07:56:02+00:00,reassess_GER40_tp6,"{""source"": ""Dukascopy"", ""span"": ""2014-01-01..2026-09-30""}",True,,,,,,,410,0.001,False,False
+2026-10-07T07:56:02+00:00,reassess_EURUSD_tp3,"{""source"": ""Dukascopy"", ""span"": ""2005-01-02..2026-09-30""}",True,,,,,,,410,0.0,False,False
+2026-10-07T07:56:02+00:00,reassess_EURUSD_tp6,"{""source"": ""Dukascopy"", ""span"": ""2005-01-02..2026-09-30""}",True,,,,,,,410,0.0,False,False
+2026-10-07T08:16:41+00:00,reassess_XAUUSD_tp3,"{""source"": ""FundingPips"", ""span"": ""2010-01-03..2026-10-07""}",True,,,,,0.0019,,418,0.002,False,False
+2026-10-07T08:16:41+00:00,reassess_XAUUSD_tp6,"{""source"": ""FundingPips"", ""span"": ""2010-01-03..2026-10-07""}",True,,,,,0.0387,,418,0.036,False,False
+2026-10-07T08:16:41+00:00,reassess_BTCUSD_tp3,"{""source"": ""Bitstamp"", ""span"": ""2014-01-01..2026-09-26""}",True,,,,,,,418,0.541,False,False
+2026-10-07T08:16:41+00:00,reassess_BTCUSD_tp6,"{""source"": ""Bitstamp"", ""span"": ""2014-01-01..2026-09-26""}",True,,,,,,,418,0.987,True,True
+2026-10-07T08:16:41+00:00,reassess_GER40_tp3,"{""source"": ""Dukascopy"", ""span"": ""2014-01-01..2026-09-30""}",True,,,,,,,418,0.0,False,False
+2026-10-07T08:16:41+00:00,reassess_GER40_tp6,"{""source"": ""Dukascopy"", ""span"": ""2014-01-01..2026-09-30""}",True,,,,,,,418,0.001,False,False
+2026-10-07T08:16:41+00:00,reassess_EURUSD_tp3,"{""source"": ""Dukascopy"", ""span"": ""2005-01-02..2026-09-30""}",True,,,,,,,418,0.0,False,False
+2026-10-07T08:16:41+00:00,reassess_EURUSD_tp6,"{""source"": ""Dukascopy"", ""span"": ""2005-01-02..2026-09-30""}",True,,,,,,,418,0.0,False,False
+2026-10-07T08:27:55+00:00,gold_G1_turtle55,"{""data"": ""FundingPips clean""}",True,,,,,0.4758,,424,0.037,False,False
+2026-10-07T08:27:55+00:00,gold_G2_clenow_trend,"{""data"": ""FundingPips clean""}",True,,,,,0.1026,,424,0.008,False,False
+2026-10-07T08:27:55+00:00,gold_G3_tsmom12,"{""data"": ""FundingPips clean""}",True,,,,,0.1457,,424,0.002,False,False
+2026-10-07T08:27:55+00:00,gold_G4_faber_10m,"{""data"": ""FundingPips clean""}",True,,,,,,,424,,False,False
+2026-10-07T08:27:55+00:00,gold_G5_pdh_breakout,"{""data"": ""FundingPips clean""}",True,,,,,0.0358,,424,0.239,False,False
+2026-10-07T08:27:55+00:00,gold_G6_h1_mom_uptrend,"{""data"": ""FundingPips clean""}",True,,,,,0.1235,,424,0.212,False,False
+2026-10-07T09:33:43+00:00,sltp_1.5_3.0,"{""sl_tp_atr"": ""1.5/3.0""}",True,0.0444,,,,0.0211,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_1.5_4.0,"{""sl_tp_atr"": ""1.5/4.0""}",True,0.0718,,,,0.0443,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_1.5_6.0,"{""sl_tp_atr"": ""1.5/6.0""}",True,0.1509,,,,0.0522,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_1.5_8.0,"{""sl_tp_atr"": ""1.5/8.0""}",True,0.1883,,,,0.109,,430,,True,True
+2026-10-07T09:33:43+00:00,sltp_2.0_3.0,"{""sl_tp_atr"": ""2.0/3.0""}",True,0.054,,,,0.0197,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.0_4.0,"{""sl_tp_atr"": ""2.0/4.0""}",True,0.076,,,,0.048,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.0_6.0,"{""sl_tp_atr"": ""2.0/6.0""}",True,0.1592,,,,0.0633,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.0_8.0,"{""sl_tp_atr"": ""2.0/8.0""}",True,0.1893,,,,0.111,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.5_3.0,"{""sl_tp_atr"": ""2.5/3.0""}",True,0.0537,,,,0.015,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.5_4.0,"{""sl_tp_atr"": ""2.5/4.0""}",True,0.0717,,,,0.0394,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.5_6.0,"{""sl_tp_atr"": ""2.5/6.0""}",True,0.1414,,,,0.0541,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_2.5_8.0,"{""sl_tp_atr"": ""2.5/8.0""}",True,0.1456,,,,0.0886,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_3.0_3.0,"{""sl_tp_atr"": ""3.0/3.0""}",True,0.0696,,,,0.0125,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_3.0_4.0,"{""sl_tp_atr"": ""3.0/4.0""}",True,0.0837,,,,0.0337,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_3.0_6.0,"{""sl_tp_atr"": ""3.0/6.0""}",True,0.1411,,,,0.0559,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_3.0_8.0,"{""sl_tp_atr"": ""3.0/8.0""}",True,0.1645,,,,0.0855,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_4.0_3.0,"{""sl_tp_atr"": ""4.0/3.0""}",True,0.0465,,,,0.0163,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_4.0_4.0,"{""sl_tp_atr"": ""4.0/4.0""}",True,0.0819,,,,0.0336,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_4.0_6.0,"{""sl_tp_atr"": ""4.0/6.0""}",True,0.1065,,,,0.0658,,430,,False,False
+2026-10-07T09:33:43+00:00,sltp_4.0_8.0,"{""sl_tp_atr"": ""4.0/8.0""}",True,0.1132,,,,0.0811,,430,,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCAD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCAD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCAD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCAD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDCHF_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_AUDJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.009,False,False
+2026-10-07T11:52:36+00:00,fp_AUDJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.004,False,False
+2026-10-07T11:52:36+00:00,fp_AUDJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_AUDNZD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDNZD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDNZD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDNZD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.002,False,False
+2026-10-07T11:52:36+00:00,fp_AUDUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_AUDUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADCHF_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_CADJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CADJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CHFJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_CHFJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.005,False,False
+2026-10-07T11:52:36+00:00,fp_CHFJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.003,False,False
+2026-10-07T11:52:36+00:00,fp_CHFJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURAUD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURAUD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.014,False,False
+2026-10-07T11:52:36+00:00,fp_EURAUD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.015,False,False
+2026-10-07T11:52:36+00:00,fp_EURAUD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCAD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCAD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCAD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCAD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURCHF_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURGBP_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURGBP_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURGBP_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURGBP_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_EURJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.004,False,False
+2026-10-07T11:52:36+00:00,fp_EURJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_EURNZD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURNZD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURNZD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURNZD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_EURUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.004,False,False
+2026-10-07T11:52:36+00:00,fp_EURUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.02,False,False
+2026-10-07T11:52:36+00:00,fp_EURUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,,False,False
+2026-10-07T11:52:36+00:00,fp_GBPAUD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPAUD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPAUD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPAUD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCAD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCAD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCAD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCAD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPCHF_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.003,False,False
+2026-10-07T11:52:36+00:00,fp_GBPJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.083,False,False
+2026-10-07T11:52:36+00:00,fp_GBPJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.119,False,False
+2026-10-07T11:52:36+00:00,fp_GBPJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_GBPNZD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPNZD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPNZD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPNZD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_GBPUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCAD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCAD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCAD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCAD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDCHF_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_NZDJPY_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_NZDUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_NZDUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCAD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCAD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCAD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCAD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCHF_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCHF_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDCHF_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_USDJPY_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.04,False,False
+2026-10-07T11:52:36+00:00,fp_USDJPY_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.082,False,False
+2026-10-07T11:52:36+00:00,fp_USDJPY_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.223,False,False
+2026-10-07T11:52:36+00:00,fp_XAGUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_XAGUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_XAGUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.0,False,False
+2026-10-07T11:52:36+00:00,fp_XAGUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.001,False,False
+2026-10-07T11:52:36+00:00,fp_XAUUSD_H1_tp3,"{""data"": ""FundingPips""}",True,,,,,,,565,0.008,False,False
+2026-10-07T11:52:36+00:00,fp_XAUUSD_H1_tp6,"{""data"": ""FundingPips""}",True,,,,,,,565,0.058,False,False
+2026-10-07T11:52:36+00:00,fp_XAUUSD_H1_tp8,"{""data"": ""FundingPips""}",True,,,,,,,565,0.154,False,False
+2026-10-07T11:52:36+00:00,fp_XAUUSD_D1_turtle55,"{""data"": ""FundingPips""}",True,,,,,,,565,0.029,False,False
+2026-10-07T11:52:36+00:00,fp_D1_turtle55_pooled,,True,,,,,,,565,0.0,False,False
+2026-10-08T08:33:23+00:00,regime_stack_XAU_tp3,"{""data"": ""Dukascopy 2005-"", ""filter"": ""daily EMA20>50>200""}",True,,,,,0.0809,,553,,True,False
+2026-10-08T08:33:23+00:00,regime_side200_XAU_tp3,"{""data"": ""Dukascopy 2005-"", ""filter"": ""daily close vs EMA200""}",True,,,,,0.0691,,553,,True,True
+2026-10-08T08:33:23+00:00,regime_stack_XAU_tp6,"{""data"": ""Dukascopy 2005-"", ""filter"": ""daily EMA20>50>200""}",True,,,,,0.1154,,553,,False,False
+2026-10-08T08:33:23+00:00,regime_side200_XAU_tp6,"{""data"": ""Dukascopy 2005-"", ""filter"": ""daily close vs EMA200""}",True,,,,,0.1102,,553,,True,True

@@ -71,7 +71,7 @@ It also runs every day at 07:00 (scheduled task "GoldAI Preflight") and sends a 
    Below that, the preflight lists which symbols would be skipped.
 2. **.env**: `MULTI_MAX_PER_GROUP=1`, `MULTI_SYMBOLS` = the FundingPips names of BTCUSD, XAUUSD and GER40 (FundingPips has no XAUEUR), and `LIVE_ACCOUNT_MODE` = the type the preflight reports for the FundingPips account (prop accounts often show as DEMO).
    Restart the trader after any `.env` change. The preflight fails if the running trader is older than `.env`.
-3. **Run 24/7 on the home PC** (FundingPips forbids VPN/VPS access): no trader gap over 1 h in the last 7 days. The laptop must never enter Modern Standby (plugged in, lid action "Do nothing", sleep "Never") and Windows Update must not restart it,
+3. **Run 24/7 on the home PC** until FundingPips confirms in writing that an India-based VPS is allowed (verbal OK on a call 2026-10-07; written confirmation pending; see RULES.md). After that, an India-region Windows VPS with >= 4 GB RAM is allowed; stop the home bot before starting the VPS bot. No VPN either way: no trader gap over 1 h in the last 7 days. The laptop must never enter Modern Standby (plugged in, lid action "Do nothing", sleep "Never") and Windows Update must not restart it,
    with MT5 logged in and Algo Trading ON.
 4. **Sizing**: every symbol shows PASS. The broker's own loss-at-stop matches the plan (x1.00).
 5. **Symbols**: real accounts can use different symbol names or contract specs.  A missing symbol shows up as a sizing FAIL.

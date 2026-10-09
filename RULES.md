@@ -98,7 +98,7 @@ Sources: help.fundingpips.com articles "2 Step Standard" and "Trading Conduct an
 | Max loss | 10 % below starting size, equity or balance, any time | in prop_guard |
 | Inactivity | breach after 30 days without a completed trade | tracked |
 | EAs | own EA = full automation allowed **with proof of ownership** (source code, version-control history, dev environment, or explain the logic on a call) | keep git history; commit regularly |
-| **VPN / VPS** | **connecting to the account through a VPN or VPS is not permitted**; IP region must stay consistent | run on the home PC only; it must never sleep |
+| **VPN / VPS** | help centre: **connecting through a VPN or VPS is not permitted**; IP region must stay consistent. **2026-10-07: FundingPips told the owner on a phone call that an India-based VPS is allowed for our own EA. Written confirmation requested, not yet received** | home PC until the written confirmation arrives; then an India-region Windows VPS (>= 4 GB RAM) is allowed. Never a VPN; never two bots on one account |
 | Forbidden | gap trading, HFT, server spamming, latency/reverse arbitrage, toxic flow, hedging, tick scalping, churning, copy trading in, third-party management | none apply |
 | News (eval) | no restriction, but purposely trading news is prohibited | live news filter stays on |
 | News (Master) | profits of trades opened or closed within +-5 min of red news (+-10 min of speeches) may be deducted, unless opened >= 5 h before | soft breach only |

@@ -107,28 +107,33 @@ def _simulate(o, h, l, c, atr, entries, i0, i1, warmup,
 
     for i in range(start, i1):
         # ---- manage ----
+        busy_at_open = 0
         if pos != 0:
             bars_held += 1
             ex = 0.0
             reason = -1
+            ex_at_open = False
             if pos == 1:
                 if o[i] - hs <= sl:
-                    ex = o[i] - hs - slippage; reason = 1
+                    ex = o[i] - hs - slippage; reason = 1; ex_at_open = True
                 elif l[i] - hs <= sl:
                     ex = sl - slippage; reason = 1
                 elif o[i] - hs >= tp:
-                    ex = o[i] - hs; reason = 0
+                    ex = o[i] - hs; reason = 0; ex_at_open = True
                 elif h[i] - hs >= tp:
                     ex = tp; reason = 0
             else:
                 if o[i] + hs >= sl:
-                    ex = o[i] + hs + slippage; reason = 1
+                    ex = o[i] + hs + slippage; reason = 1; ex_at_open = True
                 elif h[i] + hs >= sl:
                     ex = sl + slippage; reason = 1
                 elif o[i] + hs <= tp:
-                    ex = o[i] + hs; reason = 0
+                    ex = o[i] + hs; reason = 0; ex_at_open = True
                 elif l[i] + hs <= tp:
                     ex = tp; reason = 0
+            busy_at_open = 1
+            if reason >= 0 and ex_at_open:
+                busy_at_open = 0
             if reason < 0 and i == i1 - 1:
                 ex = (c[i] - hs - slippage) if pos == 1 else (c[i] + hs + slippage)
                 reason = 2
@@ -176,6 +181,11 @@ def _simulate(o, h, l, c, atr, entries, i0, i1, warmup,
             continue
 
         # ---- entry (decided from <= i-1, filled at open[i]) ----
+        # A trade that closed INSIDE this bar was still open at open[i]; live (one position per symbol)
+        # cannot enter here.  Allowing it leaked bar-i information (fixed 2026-10-07: BTC H1 validation
+        # +0.22R -> ~+0.04R).  Exits at the open itself free the slot, as they do live.
+        if busy_at_open:
+            continue
         d = entries[i]
         if d == 0:
             continue

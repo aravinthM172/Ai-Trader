@@ -38,3 +38,9 @@ data/dukascopy_raw/
 data/dukascopy_H1/
 data/mt5_D1/
 data/yahoo_D1/
+
+# .env backups (secrets), VPS copy bundle, FundingPips / gold research downloads (re-creatable: tools/collect_fp_history.py, tools/collect_gold_data.py)
+.env.bak*
+vps_bundle.zip
+data/fp/
+data/gold/

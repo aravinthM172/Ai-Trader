@@ -52,11 +52,11 @@ TRADES = REPORTS / "paper_daily_trades.csv"
 STATE = REPORTS / "paper_daily_state.json"
 MIN_PAPER_TRADES = 30
 
-INDICES = ["DAX40.vx", "NAS100.vx", "SP500.vx", "US30.vx", "JPN225.vx",
-           "HK50.vx", "UK100.vx", "FRA40.vx", "EU50.vx", "AUS200.vx"]
+# FundingPips symbol names (HK50, FRA40, EU50 and AUS200 are not offered there)
+INDICES = ["GER40", "NDX100", "SPX500", "DJI30", "JP225", "FTSE100"]
 SLEEVES = {
     "rsi2_indices": [("connors_rsi2", s) for s in INDICES],
-    "trend_gold_btc": [(st, s) for st in ("turtle55", "clenow_trend") for s in ("XAUUSD.vx", "BTCUSD.vx")],
+    "trend_gold_btc": [(st, s) for st in ("turtle55", "clenow_trend") for s in ("XAUUSD", "BTCUSD")],
 }
 
 
