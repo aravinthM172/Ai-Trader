@@ -1,8 +1,8 @@
 """
 Runs on the TRADING PC.  Every PUSH_SECONDS it collects a read-only snapshot
-(dashboard/data.gather) and POSTs it to the cloud dashboard.  Outbound only -- nothing in the
-cloud can reach this PC, MT5 or the bot.  If the cloud is down, the push fails quietly and
-the bot is unaffected.
+(dashboard/data.gather) and POSTs it to the cloud dashboard.  Outbound only -- the PC polls the
+cloud for dashboard commands (start / pause / emergency stop / switch MT5 account); nothing in the
+cloud can connect to this PC.  If the cloud is down, the push fails quietly and the bot is unaffected.
 
 .env (or .env.dashboard, git-ignored) on the PC:
     DASHBOARD_URL=https://<your-host>          (e.g. https://141-1-2-3.sslip.io)
@@ -80,7 +80,8 @@ def main() -> int:
                     gw = None
             if gw is not None:
                 push(ticks(gw), url=url, token=token, path="/api/tick", timeout=8.0)
-            handle_command(url, token)
+            if handle_command(url, token):         # refresh the page's bot status ~10 s after a command
+                last_full = time.time() - PUSH_SECONDS + 10
         except Exception as e:
             log.debug("tick push failed: %s", e)
             gw = None
@@ -114,6 +115,16 @@ def execute_command(cmd: dict, *, kill=KILL, flatten=FLATTEN, start_task=None, r
         flatten.write_text(stamp, encoding="utf-8")         # execution/live_multi.py closes all bot positions
         log.warning("WEBSITE EMERGENCY STOP: kill switch set, trader closing all bot positions")
         return "done", "Emergency stop: no new trades, and the trader is closing all open bot trades (within ~30 s)."
+    if action == "pause":
+        kill.parent.mkdir(exist_ok=True)
+        kill.write_text(datetime.now(timezone.utc).isoformat() + "  website pause\n", encoding="utf-8")
+        log.warning("WEBSITE PAUSE: kill switch set, open trades left to their SL/TP")
+        return "done", "Paused: no new trades. Open trades keep their stop-loss / take-profit."
+    if action == "switch_account":
+        from dashboard.account_switch import switch_account
+        status, message = switch_account(cmd, mt5=mt5_module(), magics=bot_magics())
+        log.warning("WEBSITE ACCOUNT SWITCH to %s: %s -- %s", cmd.get("login"), status, message)
+        return status, message
     if action == "start":
         reason = kill.read_text(encoding="utf-8").strip() if kill.exists() else ""
         if reason and any(k in reason for k in PROTECTIVE) and not cmd.get("force"):
@@ -124,24 +135,37 @@ def execute_command(cmd: dict, *, kill=KILL, flatten=FLATTEN, start_task=None, r
         msg = "Kill switch cleared; new entries allowed."
         if not running():
             (start_task or _start_task)()
-            msg += " Trader was not running -> started the GoldAITrader task."
+            msg += " Trader was not running -> started it."
         log.warning("WEBSITE START: %s", msg)
         return "done", msg
     return "failed", f"unknown action {action!r}"
 
 
 def _start_task() -> None:
-    import subprocess
-    subprocess.run(["schtasks", "/Run", "/TN", "GoldAITrader"], capture_output=True, timeout=20)
+    """Start only the trader loop (the GoldAITrader task would also start a second watchdog + publisher)."""
+    from dashboard.account_switch import start_loops
+    start_loops(loops=(("start_live_multi.bat", "execution.live_multi"),))
 
 
-def handle_command(url: str, token: str) -> None:
+def mt5_module():
+    import MetaTrader5
+    return MetaTrader5
+
+
+def bot_magics() -> set[int]:
+    from execution.live_multi import magic_for, symbols
+    return {magic_for(s) for s in symbols()}
+
+
+def handle_command(url: str, token: str) -> bool:
+    """Run the pending dashboard command, if any.  True when one was handled."""
     base = url.rstrip("/")
     cmd = _http_json(base + "/api/command/next", token)
     if not cmd.get("id"):
-        return
+        return False
     status, message = execute_command(cmd)
     _http_json(base + "/api/command/ack", token, data={"id": cmd["id"], "status": status, "message": message})
+    return True
 
 
 def ticks(gw) -> dict:

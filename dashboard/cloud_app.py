@@ -6,14 +6,15 @@ Cloud dashboard server (runs on the Oracle Cloud VM).  Python stdlib only.
   GET  /api/state   latest snapshot + equity history   (Basic auth)
   POST /api/tick    live bid/ask every few seconds       (Bearer token)
   GET  /api/tick    latest live prices                  (Basic auth)
-  POST /api/command start / emergency stop from the page (Basic auth)
+  POST /api/command start / pause / emergency stop / switch MT5 account from the page (Basic auth)
   GET  /api/command status of the latest command        (Basic auth)
   GET  /api/command/next  pending command for the PC    (Bearer token)
   POST /api/command/ack   PC reports the result          (Bearer token)
   GET  /healthz     liveness                            (no auth, no data)
 
 Binds 127.0.0.1:8080 by default; Caddy in front provides HTTPS (deploy/dashboard_setup.sh).
-It only stores and shows snapshots -- it has no route that can reach MT5 or trade.
+It only stores snapshots and queues commands for the PC to fetch -- it cannot connect to the PC.
+An account-switch password is kept in memory only until the PC fetches it, and is never sent back to the page.
 
     DASHBOARD_PUSH_TOKEN=... DASHBOARD_USER=... DASHBOARD_PASSWORD=... python -m dashboard.cloud_app
 """
@@ -37,7 +38,9 @@ MAX_BODY = 8 * 1024 * 1024
 _TICK: dict = {}                                  # latest live prices (memory only)
 _CMD: dict = {}                                   # latest bot command from the dashboard (memory only)
 CMD_TTL = 120                                     # seconds a command waits for the PC before expiring
-ACTIONS = ("start", "stop")
+ACTIONS = ("start", "stop", "pause", "switch_account")
+ACCOUNT_SIZES = ("5000", "10000", "25000", "50000", "100000")   # FundingPips 2-step sizes (as dashboard/account_switch)
+SECRET_FIELDS = ("password",)                     # never returned to the page, wiped once the PC has it
 MAX_POINTS = 50_000
 
 
@@ -94,6 +97,39 @@ def state(*, data_dir: Path = DATA) -> dict:
     return latest
 
 
+def new_command(body: dict) -> tuple[dict, str]:
+    """Validate a command from the page -> (command, error)."""
+    action, kind = body.get("action"), body.get("account_type")
+    confirm = ("SWITCH REAL" if kind == "real" else "SWITCH") if action == "switch_account" else str(action).upper()
+    if action not in ACTIONS or body.get("confirm") != confirm:
+        return {}, f"action must be start/pause/stop/switch_account, confirmed with {confirm if action in ACTIONS else 'its word'}"
+    cmd = {"id": f"{int(time.time() * 1000)}", "action": action, "force": bool(body.get("force")),
+           "created": time.time(), "status": "pending", "message": "waiting for the trading PC"}
+    if action == "switch_account":
+        login, server, password = str(body.get("login", "")).strip(), str(body.get("server", "")).strip(), body.get("password")
+        if not login.isdigit() or not 3 <= len(login) <= 15:
+            return {}, "login must be the MT5 account number (digits only)"
+        if not server or len(server) > 100:
+            return {}, "server is required, exactly as MT5 shows it"
+        if not isinstance(password, str) or not password or len(password) > 100:
+            return {}, "password is required"
+        if kind not in ("demo", "real"):
+            return {}, "choose the account type: demo or real"
+        size, phase = str(body.get("account_size", "")), str(body.get("phase", ""))
+        if size not in ACCOUNT_SIZES:
+            return {}, "choose the account size: " + ", ".join(f"${int(s):,}" for s in ACCOUNT_SIZES)
+        if phase not in ("1", "2"):
+            return {}, "choose the challenge phase: 1 or 2"
+        cmd.update(login=login, server=server, password=password, account_type=kind, account_size=int(size),
+                   phase=phase, close_first=bool(body.get("close_first")))
+    return cmd, ""
+
+
+def public_cmd() -> dict:
+    """The latest command as the page may see it (no secrets)."""
+    return {k: v for k, v in _CMD.items() if k not in SECRET_FIELDS}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "dash/1"
 
@@ -131,13 +167,21 @@ class Handler(BaseHTTPRequestHandler):
             pending = _CMD.get("status") == "pending" and time.time() - _CMD.get("created", 0) <= CMD_TTL
             if _CMD.get("status") == "pending" and not pending:
                 _CMD.update(status="expired", message="PC did not pick it up within 2 minutes (is the publisher running?)")
-            return self._send(200, json.dumps(_CMD if pending else {}).encode())
+                for k in SECRET_FIELDS:
+                    _CMD.pop(k, None)
+            if not pending:
+                return self._send(200, b"{}")
+            out = dict(_CMD)
+            for k in SECRET_FIELDS:
+                _CMD.pop(k, None)
+            _CMD.update(status="running", message="the trading PC is working on it")
+            return self._send(200, json.dumps(out).encode())
         if not self._auth():
             return
         if self.path in ("/", "/index.html"):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         if self.path == "/api/command":
-            return self._send(200, json.dumps(_CMD or {}).encode())
+            return self._send(200, json.dumps(public_cmd()).encode())
         if self.path.startswith("/api/tick"):
             return self._send(200, json.dumps(_TICK or {"symbols": {}}).encode())
         if self.path.startswith("/api/state"):
@@ -152,13 +196,12 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096)) or b"{}")
             except Exception:
                 return self._send(400, b'{"error":"bad json"}')
-            action = body.get("action")
-            if action not in ACTIONS or body.get("confirm") != action.upper():
-                return self._send(400, b'{"error":"action must be start/stop and confirm must be START/STOP"}')
+            cmd, err = new_command(body)
+            if err:
+                return self._send(400, json.dumps({"error": err}).encode())
             _CMD.clear()
-            _CMD.update(id=f"{int(time.time() * 1000)}", action=action, force=bool(body.get("force")),
-                        created=time.time(), status="pending", message="waiting for the trading PC")
-            return self._send(200, json.dumps(_CMD).encode())
+            _CMD.update(cmd)
+            return self._send(200, json.dumps(public_cmd()).encode())
         if self.path == "/api/command/ack":                   # from the PC
             token, _, _ = _cfg()
             if not bearer_ok(self.headers.get("Authorization"), token):

@@ -81,6 +81,18 @@ button.theme { margin-left: auto; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .btn-start { border-color: var(--good); } .btn-stop { border-color: var(--critical); color: var(--critical); font-weight: 600; }
 .controls input { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); width: 150px; }
+.btn-pause { border-color: var(--warning); }
+.bot-state { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 700;
+  letter-spacing: .04em; border: 2px solid var(--border); color: var(--text-primary); }
+.bot-state::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--dot, var(--border)); }
+.bot-state.s-good { border-color: var(--good); --dot: var(--good); }
+.bot-state.s-warning { border-color: var(--warning); --dot: var(--warning); }
+.bot-state.s-critical { border-color: var(--critical); --dot: var(--critical); }
+.bot-state.s-unknown { --dot: var(--text-secondary); }
+.acct-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 12px; align-items: end; margin-top: 10px; }
+.acct-form label { display: grid; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.acct-form input[type=text], .acct-form input[type=password], .acct-form select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); width: 100%; box-sizing: border-box; }
+.acct-form .check { display: flex; gap: 6px; align-items: center; grid-column: 1 / -1; color: var(--text-primary); }
 </style>
 </head>
 <body>
@@ -94,14 +106,50 @@ button.theme { margin-left: auto; }
 
   <section class="controls card" aria-label="Bot controls">
     <strong>Bot</strong>
+    <span class="bot-state" id="botState" role="status" aria-live="polite">…</span>
+    <span class="small muted" id="botWhy"></span>
     <button class="tab btn-start" id="btnStart" type="button">▶ Start bot</button>
+    <button class="tab btn-pause" id="btnPause" type="button">❚❚ Pause</button>
     <button class="tab btn-stop" id="btnStop" type="button">■ Emergency stop</button>
+    <button class="tab" id="btnAcct" type="button" aria-expanded="false" aria-controls="acctBox">⇄ Switch MT5 account</button>
     <span id="confirmBox" hidden>
       <input id="confirmInput" autocomplete="off" aria-label="Type the confirmation word">
       <button class="tab" id="confirmGo" type="button">Confirm</button>
       <button class="tab" id="confirmCancel" type="button">Cancel</button>
     </span>
     <span class="small" id="cmdMsg"></span>
+  </section>
+
+  <section class="card" id="acctBox" hidden aria-label="Switch MT5 account" style="margin:0 0 12px">
+    <h2>Switch MT5 account</h2>
+    <div class="small muted">Logs MetaTrader on the VPS in to another account. The bot's history for the current account is archived,
+      and trading stays <strong>paused</strong> until you press Start. The password goes to the VPS once and is not stored.</div>
+    <form class="acct-form" id="acctForm" autocomplete="off">
+      <label>Login (account number)<input type="text" id="acctLogin" inputmode="numeric" pattern="[0-9]{3,15}" required></label>
+      <label>Password<input type="password" id="acctPw" autocomplete="new-password" required></label>
+      <label>Server (as MT5 shows it)<input type="text" id="acctServer" placeholder="FundingPips-Trial" required></label>
+      <label>Account size (the size you bought)<select id="acctSize" required>
+        <option value="">Choose…</option><option value="5000">$5,000</option><option value="10000">$10,000</option>
+        <option value="25000">$25,000</option><option value="50000">$50,000</option><option value="100000">$100,000</option>
+      </select></label>
+      <label>Challenge phase<select id="acctPhase" required>
+        <option value="1">Phase 1 (8 % target)</option><option value="2">Phase 2 (5 % target)</option>
+      </select></label>
+      <div class="small muted" style="grid-column:1/-1">Lot sizes follow the account's balance by themselves. The size sets the base for the
+        daily and total loss limits; the switch is undone if MT5's balance is not within 90–115 % of it.</div>
+      <fieldset class="check" style="border:0;padding:0;margin:0">
+        <legend style="float:left;margin-right:8px;color:var(--text-secondary)">Account type</legend>
+        <label class="check" style="grid-column:auto"><input type="radio" name="acctType" value="demo" required> Demo</label>
+        <label class="check" style="grid-column:auto"><input type="radio" name="acctType" value="real"> Real money</label>
+      </fieldset>
+      <div class="small" id="acctRealWarn" hidden style="grid-column:1/-1;color:var(--critical);font-weight:600">
+        Real money: the bot will place real orders on this account after you press Start. Most prop-firm accounts
+        (FundingPips included) are Demo type even when funded; MT5 shows the type, and the switch is undone if it does not match.</div>
+      <label class="check"><input type="checkbox" id="acctClose"> Close the bot's open trades first (otherwise the switch is refused while it has trades)</label>
+      <label><span id="acctConfirmLbl">Type SWITCH to confirm</span><input type="text" id="acctConfirm" autocomplete="off" required></label>
+      <div style="display:flex;gap:8px"><button class="tab btn-start" type="submit">Switch account</button>
+        <button class="tab" id="acctCancel" type="button">Cancel</button></div>
+    </form>
   </section>
 
   <section class="grid g4" id="tiles" aria-label="Account and challenge"></section>
@@ -238,7 +286,35 @@ function ensureSymCharts(syms) {
 }
 function markSelected() { for (const [s, c] of Object.entries(C)) c.card.classList.toggle("sel", s === sym); }
 
+// One-word bot status for the controls bar: RUNNING / PAUSED / OFF / DRY-RUN / NOT UPDATING / UNKNOWN
+function botStatus(S) {
+  const age = S.received_utc ? (Date.now() - Date.parse(S.received_utc)) / 60000 : null;
+  if (age === null || age > 5) return ["unknown", "UNKNOWN", age === null ? "no data from the VPS yet" : `VPS has not reported for ${age.toFixed(0)} min`];
+  const p = S.processes || {}, m = (S.multi || {}).status || {}, mAge = (S.multi || {}).age_min;
+  if (!p.live_multi) return ["critical", "OFF", "trader is not running — press Start"];
+  if (!p.mt5) return ["critical", "OFF", "MetaTrader 5 is closed on the VPS"];
+  if (S.kill_switch) {
+    const k = S.kill_switch.replace(/^\S+\s+/, "");
+    const why = /website pause/.test(k) ? "paused from the dashboard"
+      : /website emergency stop/.test(k) ? "emergency stop from the dashboard"
+      : /account switch/.test(k) ? "after an account switch" : `safety stop: ${k}`;
+    const trades = /website emergency stop/.test(k) ? "the bot's trades were closed" : "open trades keep their SL/TP";
+    return ["warning", "PAUSED", `${why} — ${trades}; press Start to resume`];
+  }
+  if (mAge != null && mAge > 5) return ["critical", "NOT UPDATING", `trader's last pass was ${mAge.toFixed(0)} min ago`];
+  if (m.mode !== "LIVE") return ["warning", "DRY-RUN", `no real orders${m.send_block_reason ? ": " + m.send_block_reason : ""}`];
+  return ["good", "RUNNING", "taking trades"];
+}
+function renderBotStatus() {
+  const [lvl, word, why] = botStatus(S), a = (S.market || {}).account || {};
+  const b = $("botState"); b.className = "bot-state s-" + lvl; b.textContent = word;
+  const acct = a.login ? ` · account ${a.login} (${[a.server, (a.type || "").toUpperCase()].filter(Boolean).join(", ")})` : "";
+  const when = S.received_utc ? ` · as of ${new Date(S.received_utc).toLocaleTimeString()}` : "";
+  $("botWhy").textContent = why + acct + when;
+}
+
 function renderHeader() {
+  renderBotStatus();
   const c = $("chips"); c.innerHTML = "";
   const age = S.received_utc ? (Date.now() - Date.parse(S.received_utc)) / 60000 : null;
   c.append(age === null ? chip("critical", "no data") : age > 5 ? chip("critical", `PC silent ${age.toFixed(0)} min`) : chip("good", "PC online"));
@@ -576,12 +652,43 @@ async function loadTick() {
 let pendingAction = null;
 function askConfirm(action) {
   pendingAction = action; $("confirmBox").hidden = false; $("confirmInput").value = "";
-  $("confirmInput").placeholder = action === "start" ? "type START" : "type STOP";
-  $("cmdMsg").textContent = action === "stop" ? "Stops new trades AND closes all open bot trades at market." : "Clears the kill switch and starts the trader if needed.";
+  $("confirmInput").placeholder = "type " + action.toUpperCase();
+  $("cmdMsg").textContent = { stop: "Stops new trades AND closes all open bot trades at market.",
+    pause: "Stops new trades. Open trades keep their stop-loss / take-profit.",
+    start: "Clears the kill switch and starts the trader if needed." }[action];
   $("confirmInput").focus();
 }
 $("btnStart").onclick = () => askConfirm("start");
 $("btnStop").onclick = () => askConfirm("stop");
+$("btnPause").onclick = () => askConfirm("pause");
+const CMD_NAMES = { start: "Start", pause: "Pause", stop: "Emergency stop", switch_account: "Account switch" };
+function showAcct(open) {
+  $("acctBox").hidden = !open; $("btnAcct").setAttribute("aria-expanded", String(open));
+  if (!open) $("acctForm").reset(); else $("acctLogin").focus();
+}
+$("btnAcct").onclick = () => showAcct($("acctBox").hidden);
+$("acctCancel").onclick = () => showAcct(false);
+const acctType = () => (document.querySelector('input[name="acctType"]:checked') || {}).value || "";
+const acctWord = () => acctType() === "real" ? "SWITCH REAL" : "SWITCH";
+for (const r of document.querySelectorAll('input[name="acctType"]')) r.onchange = () => {
+  $("acctRealWarn").hidden = acctType() !== "real";
+  $("acctConfirmLbl").textContent = `Type ${acctWord()} to confirm`;
+};
+$("acctForm").onreset = () => { $("acctRealWarn").hidden = true; $("acctConfirmLbl").textContent = "Type SWITCH to confirm"; };
+$("acctForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!acctType()) { $("cmdMsg").textContent = "Choose Demo or Real"; return; }
+  if (!$("acctSize").value) { $("cmdMsg").textContent = "Choose the account size"; return; }
+  if ($("acctConfirm").value.trim().toUpperCase().replace(/\s+/g, " ") !== acctWord()) { $("cmdMsg").textContent = `Type ${acctWord()} to confirm`; return; }
+  const body = { action: "switch_account", confirm: acctWord(), account_type: acctType(), login: $("acctLogin").value.trim(),
+    password: $("acctPw").value, server: $("acctServer").value.trim(), close_first: $("acctClose").checked,
+    account_size: $("acctSize").value, phase: $("acctPhase").value };
+  try {
+    const j = await (await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    $("cmdMsg").textContent = j.error ? "Error: " + j.error : "Sent — the VPS is switching (can take 1–4 min)…";
+    if (!j.error) { showAcct(false); pollCmd(0); }
+  } catch (err) { $("cmdMsg").textContent = "Could not reach the server"; }
+};
 $("confirmCancel").onclick = () => { $("confirmBox").hidden = true; pendingAction = null; $("cmdMsg").textContent = ""; };
 $("confirmInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("confirmGo").click(); });
 $("confirmGo").onclick = async () => {
@@ -600,9 +707,9 @@ $("confirmGo").onclick = async () => {
 async function pollCmd(n) {
   try {
     const j = await (await fetch("/api/command", { cache: "no-store" })).json();
-    if (j.status) $("cmdMsg").textContent = `${j.action === "stop" ? "Emergency stop" : "Start"}: ${j.status} — ${j.message || ""}` +
-      (j.status === "refused" ? " (press Start and type FORCE)" : "");
-    if (j.status === "pending" && n < 70) setTimeout(() => pollCmd(n + 1), 2000); else load();
+    if (j.status) $("cmdMsg").textContent = `${CMD_NAMES[j.action] || j.action}: ${j.status} — ${j.message || ""}` +
+      (j.status === "refused" && j.action === "start" ? " (press Start and type FORCE)" : "");
+    if ((j.status === "pending" || j.status === "running") && n < 150) setTimeout(() => pollCmd(n + 1), 2000); else load();
   } catch (e) { /* ignore */ }
 }
 for (const id of ["strengthBox", "rulesBox", "alertsBox"]) {
