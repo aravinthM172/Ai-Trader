@@ -277,3 +277,39 @@ def test_symbol_cap_skips_oversized_min_lot(monkeypatch):
     kw = dict(equity=5000, risk_frac=0.0025, sl_dist=120, value_per_unit=20, vmin=0.01, vstep=0.01, vmax=50)
     assert lm.size_volume(max_risk_frac=lm.symbol_max_risk("NDX100"), **kw)[0] == 0
     assert lm.size_volume(max_risk_frac=lm.symbol_max_risk("XAUUSD"), **kw)[0] == 0.01
+
+
+# ---- buy-only symbols (MULTI_LONG_ONLY_SYMBOLS) -----------------------------------------
+import pytest as _pytest
+
+_long_only = _pytest.mark.skipif(not hasattr(lm, "LONG_ONLY_SYMBOLS"), reason="buy-only patch not applied yet")
+
+
+def _side_call(monkeypatch, decision, long_only):
+    monkeypatch.setattr(lm, "LONG_ONLY_SYMBOLS", long_only)
+    monkeypatch.setattr(lm, "REGIME_SYMBOLS", set())
+    monkeypatch.setattr(lm.btc_h1_signal, "generate", lambda s, done: _NS(decision=decision, signal_bar_utc="sig"))
+    news = _NS(blocking_event=lambda s, now: {"event": "CPI"}, is_blocked=lambda s, now: True)
+    bars = _RegimeGw(None).get_rates("NDX100", "H1", 400)
+    due = bars.time.iloc[-2].isoformat()
+    now = (bars.time.iloc[-1] + pd.Timedelta(minutes=5)).to_pydatetime()
+    return lm._evaluate_symbol(_RegimeGw(None), None, None, "NDX100", object(), "Indices", due, now, 5000.0,
+                               news, None, False, {})
+
+
+@_long_only
+def test_long_only_blocks_sell(monkeypatch):
+    res = _side_call(monkeypatch, "SELL", {"NDX100"})
+    assert res["decision"] == "blocked" and res["final"] is True and res["reason"] == "buy-only symbol"
+
+
+@_long_only
+def test_long_only_lets_buy_through(monkeypatch):
+    res = _side_call(monkeypatch, "BUY", {"NDX100"})
+    assert "news" in res.get("reason", "")                    # passed, stopped by the next check
+
+
+@_long_only
+def test_long_only_off_for_unlisted_symbols(monkeypatch):
+    res = _side_call(monkeypatch, "SELL", {"USDJPY"})
+    assert "news" in res.get("reason", "")
