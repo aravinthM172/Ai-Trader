@@ -277,6 +277,11 @@ def main() -> int:
             paper_ml_filter.run_once(gw)
         except Exception as e:
             log.exception("paper ML filter failed: %s", e)
+        try:                                                       # one combined file for every test (tools/paper_report.py)
+            from tools import paper_report
+            paper_report.write()
+        except Exception as e:
+            log.exception("combined paper report failed: %s", e)
     except Exception as e:
         log.exception("pass failed: %s", e)
         return 1
