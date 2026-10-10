@@ -44,3 +44,8 @@ data/yahoo_D1/
 vps_bundle.zip
 data/fp/
 data/gold/
+
+# round 5-7 research downloads (re-creatable: backtest/strategy_round5.py, strategy_round6.py)
+data/binance_H1/
+data/binance_funding/
+data/fred/

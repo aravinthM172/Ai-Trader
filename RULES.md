@@ -108,3 +108,13 @@ Sources: help.fundingpips.com articles "2 Step Standard" and "Trading Conduct an
 | Leverage | eval: metals 1:30, indices 1:20, crypto 1:2; Master: crypto 1:1, dynamic leverage on metals/indices | margin fine at $5k |
 | Lot limit | 20 lots per trade, crypto 1 lot | fine |
 | Rewards | On Demand 90 % needs 35 % consistency; Monthly 100 % needs 7 days >= 0.5 % and lowers the strike trigger to 1 % | 0.9 % idea-loss close already matches |
+
+## 10. Live setup and trial review rule -- set 2026-10-10 (owner approved)
+| Item | Rule |
+|---|---|
+| Markets on the VPS | BTCUSD, ETHUSD (half risk), XAUUSD, USDJPY (half risk, buy-only), NDX100 (buy-only), GER40 (buy-only); daily EMA200 filter on XAUUSD, NDX100, USDJPY, GER40 |
+| Risk per trade | planned 0.25 % (`MULTI_RISK_PER_TRADE`); a trade whose smallest lot would risk more than **0.4 %** is skipped for XAUUSD, NDX100 and GER40 (`MULTI_SYMBOL_MAX_RISK`). On a $5k account that skips most gold and index trades; they trade by themselves once the balance makes the lot fit |
+| Why the cap | simulation at the lot sizes really traded (gold 0.6 %, NDX100 0.74 %): challenge fail rate 13.7 % against 0 % at planned sizes (`backtest`, 2026-10-10) |
+| Review | pause and review by hand if the account is 4 % below its starting balance; judge the strategy at 100 closed trades; buy a larger account only if the average is above +0.10 R per trade and the drawdown stayed clear of the challenge limit |
+| New markets and ideas | 30 closed paper or capped trades before any size increase; remove a market that is 5 R down after 30 trades |
+| Paper ideas | `execution/paper_ideas.py` (hourly task "GoldAI Paper Ideas", never sends orders): BTC / ETH daily breakout with both exits, gold Asian hours; started 2026-10-10 10:00 UTC, review after 4 weeks |
