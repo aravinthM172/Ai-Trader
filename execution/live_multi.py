@@ -419,7 +419,8 @@ def run_once(*, now: datetime | None = None) -> dict:
             mine = [p for p in gw.positions() if p["magic"] in magics]
             if not mine:
                 FLATTEN.unlink(missing_ok=True)
-        prop = _prop_controls(gw, c, ls, mine, specs, equity, float(acct.get("balance") or equity), now, send_ok)
+        prop = _prop_controls(gw, c, ls, mine, specs, equity, float(acct.get("balance") or equity), now, send_ok,
+                              close_ok=close_allowed(acct))
         if prop is not None:
             status["prop"] = prop.to_dict()
             mine = [p for p in gw.positions() if p["magic"] in magics]
@@ -558,11 +559,14 @@ def _emergency_flatten(gw, c, mine, specs, allowed: bool) -> dict:
     return {"positions": len(mine), "results": done, "allowed": allowed}
 
 
-def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok):
-    """Apply risk/prop_controls when a prop challenge is configured (PROP_CHALLENGE in .env)."""
+def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok, close_ok=None):
+    """Apply risk/prop_controls when a prop challenge is configured (PROP_CHALLENGE in .env).
+    close_ok: may positions be closed (close_allowed) -- true with the kill switch on, so a website Pause or an
+    earlier kill never switches the loss protection off; defaults to send_ok."""
     from tools import challenge_tracker as ct
     if not ct.enabled():
         return None
+    close_ok = send_ok if close_ok is None else close_ok
     try:
         ch = json.loads(ct.OUT.read_text(encoding="utf-8"))
     except Exception:
@@ -584,13 +588,13 @@ def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok):
         if spec is None:
             continue
         reason = "prop_flatten" if d.flatten_all else "idea_loss"
-        if send_ok:
+        if close_ok:
             _close(gw, spec, p, reason, c)
         else:
             _event(c, "would_close", {"ticket": p["ticket"], "symbol": p["symbol"], "reason": reason})
-        log.warning("PROP CONTROL %s #%s %s (P/L %.2f): %s", "CLOSE" if send_ok else "WOULD CLOSE", p["ticket"],
+        log.warning("PROP CONTROL %s #%s %s (P/L %.2f): %s", "CLOSE" if close_ok else "WOULD CLOSE", p["ticket"],
                     p["symbol"], p.get("profit") or 0.0, "; ".join(d.reasons))
-    if d.kill and send_ok and not safety.kill_switch_active():
+    if d.kill and close_ok and not safety.kill_switch_active():
         reasons = "; ".join(d.reasons)
         (STATE / "KILL_SWITCH").write_text(f"{now.isoformat()}  prop controls: {reasons}\n", encoding="utf-8")
         log.critical("KILL SWITCH TRIPPED by prop controls: %s", "; ".join(d.reasons))
