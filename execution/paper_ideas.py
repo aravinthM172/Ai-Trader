@@ -272,6 +272,11 @@ def main() -> int:
             return 1
         s = run_once(gw)
         log.info("pass done: %s", {k: (v["closed"], v["total_R"]) for k, v in s["ideas"].items()})
+        try:                                                       # same hourly pass: score the live trades (paper only)
+            from execution import paper_ml_filter
+            paper_ml_filter.run_once(gw)
+        except Exception as e:
+            log.exception("paper ML filter failed: %s", e)
     except Exception as e:
         log.exception("pass failed: %s", e)
         return 1
