@@ -43,6 +43,52 @@ def test_gold_asia_matches_the_backtest():
     assert np.allclose(mine.R_gross.to_numpy(), ref.R.to_numpy(), atol=1e-9)
 
 
+ZERO = dict(cost_frac=0.0, swap_long=0.0, swap_short=0.0)
+
+
+def _same(mine, ref, least):
+    ref = ref.iloc[:len(mine)]
+    assert len(mine) > least and len(ref) == len(mine)
+    assert (pd.to_datetime(mine.entry, utc=True).to_numpy() == ref.entry.to_numpy()).all()
+    assert np.allclose(mine.R_gross.to_numpy(), ref.R.to_numpy(), atol=1e-9)
+
+
+def test_gold_pmfix_matches_the_backtest():
+    g8 = pytest.importorskip("backtest.gold_round8")
+    df = _bars(seed=13)
+    _same(_closed(pi.gold_pmfix_trades(df)), g8.pmfix_long(df, ZERO), 100)
+
+
+def test_gold_ema_matches_the_backtest():
+    src = pytest.importorskip("backtest.gold_sources_retest")
+    df = _bars(seed=17)
+    _same(_closed(pi.gold_ema_trades(df)), src.ema_cross(df, ZERO, 9, 21, True, 2.0), 50)
+
+
+def test_gold_fomc_matches_the_backtest(monkeypatch):
+    g8 = pytest.importorskip("backtest.gold_round8")
+    df = _bars(seed=19)
+    days = tuple(str(d.date()) for d in pd.date_range("2025-01-08", "2025-08-30", freq="5D"))
+    monkeypatch.setattr(pi, "FOMC_DAYS", days)
+    when = pd.DatetimeIndex([pd.Timestamp(d + " 14:00", tz="America/New_York").tz_convert("UTC") for d in days])
+    _same(_closed(pi.gold_fomc_trades(df)), g8.news_follow(df, ZERO, when, False), 10)
+
+
+def test_new_ideas_count_from_their_own_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(pi, "DB", tmp_path / "p.sqlite")
+    monkeypatch.setattr(pi, "STATUS", tmp_path / "s.json")
+    df = _bars(n=3000, start="2026-09-01")
+    monkeypatch.setattr(pi, "PAPER_START", df.time.iloc[1000])
+    monkeypatch.setattr(pi, "START", {"gold_ema921": df.time.iloc[2000]})
+    gw = type("G", (), dict(get_rates=lambda self, s, tf, n: df.copy(),
+                            get_spec=lambda self, s: type("S", (), dict(spread_points=10.0, point=0.001))()))()
+    pi.run_once(gw, now=(df.time.iloc[-1] + pd.Timedelta(hours=1)).to_pydatetime())
+    import sqlite3
+    rows = pd.read_sql("SELECT idea, entry FROM trades", sqlite3.connect(pi.DB))
+    first = rows.groupby("idea").entry.min().map(lambda x: pd.Timestamp(x, tz="UTC"))
+    assert first["gold_ema921"] >= df.time.iloc[2000] and first["gold_asia"] < df.time.iloc[2000]
+
+
 def test_a_running_trade_is_reported_open_and_never_duplicated(tmp_path, monkeypatch):
     monkeypatch.setattr(pi, "DB", tmp_path / "p.sqlite")
     monkeypatch.setattr(pi, "STATUS", tmp_path / "s.json")

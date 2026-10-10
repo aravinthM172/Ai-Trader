@@ -1,22 +1,30 @@
 """
-Paper (dry-run) forward test of the two research ideas of 2026-10-10 -- NEVER sends orders.
+Paper (dry-run) forward test of the research ideas of 2026-10-10 -- NEVER sends orders.
 
     python -m execution.paper_ideas            one pass (the hourly scheduled task "GoldAI Paper Ideas")
     python -m execution.paper_ideas --report   print the current standing
 
-Ideas (rules exactly as backtest/strategy_round5.py, strategy_round6.py and strategy_round7.py; the functions here
-are self-contained so the VPS needs no research data, and tests/test_paper_ideas.py checks them against the backtest):
+Ideas (rules exactly as backtest/strategy_round5.py, strategy_round6.py, strategy_round7.py, gold_round8.py and
+gold_sources_retest.py; the functions here are self-contained so the VPS needs no research data, and
+tests/test_paper_ideas.py checks them against the backtest):
   breakout_nextday   BTCUSD, ETHUSD   first H1 close beyond the day's open +/- 0.5 x yesterday's range: trade the
                                       break at the next open, stop at the day's open, flat at the next day's first bar.
   breakout_trail     BTCUSD, ETHUSD   same entry; no next-day exit, the stop moves to the previous day's low / high
                                       at each new day, 10 days at most.
   gold_asia          XAUUSD           buy the 19:00 New York bar's open (one hour after the daily reopening), close at
                                       07:00 UTC, protective stop 3 ATR.
+  gold_pmfix         XAUUSD           buy the open of the 15:00 London bar (afternoon fix), close at 08:00 London the
+                                      next morning, protective stop 3 ATR.  Overlaps gold_asia: compare, do not add up.
+  gold_ema921        XAUUSD           buys only: EMA 9 crosses above EMA 21 on H1 -> buy the next open, stop 2 ATR,
+                                      out at the open after the cross back.
+  gold_fomc          XAUUSD           after the Fed announcement hour (14:00 New York on FOMC_DAYS) has closed with a
+                                      move of at least 0.5 ATR: follow it for 24 hours, stop 2 ATR.
 Day = broker day (rollover 21:00 UTC).  1 R = distance from entry to the first stop.  Costs: the symbol's spread at
 the time of the pass x 1.5 (spread + slippage); swaps and commission are not included.
 
 Every pass reloads the H1 candles from one fixed start (PAPER_START - WARMUP_DAYS), so the trade list is the same on
-every run and only grows.  Trades entered before PAPER_START are warm-up and are not counted.
+every run and only grows.  Trades entered before the start of an idea (START, else PAPER_START) are warm-up and
+are not counted.
 Writes state/paper_ideas.sqlite (table trades) and reports/paper_ideas_status.json.
 """
 from __future__ import annotations
@@ -39,7 +47,11 @@ DB = ROOT / "state" / "paper_ideas.sqlite"
 STATUS = ROOT / "reports" / "paper_ideas_status.json"
 PAPER_START = pd.Timestamp("2026-10-10 10:00", tz="UTC")       # first hour after the rules were fixed
 WARMUP_DAYS = 40
-IDEAS = {"breakout_nextday": ("BTCUSD", "ETHUSD"), "breakout_trail": ("BTCUSD", "ETHUSD"), "gold_asia": ("XAUUSD",)}
+IDEAS = {"breakout_nextday": ("BTCUSD", "ETHUSD"), "breakout_trail": ("BTCUSD", "ETHUSD"), "gold_asia": ("XAUUSD",),
+         "gold_pmfix": ("XAUUSD",), "gold_ema921": ("XAUUSD",), "gold_fomc": ("XAUUSD",)}
+# ideas added later count from their own start (gold was closed for the weekend when these three were added)
+START = {k: pd.Timestamp("2026-10-11 00:00", tz="UTC") for k in ("gold_pmfix", "gold_ema921", "gold_fomc")}
+FOMC_DAYS = ("2026-10-28", "2026-12-09")                       # scheduled announcements, 14:00 New York; extend each year
 MIN_RISK_ATR, MAX_RISK_ATR = 0.5, 6.0
 USD_PER_R = 12.5                                               # $5k x 0.25 %, for the dollar column only
 COLS = ["entry", "exit", "dir", "entry_px", "exit_px", "stop_px", "risk_px", "reason", "status", "R_gross"]
@@ -52,10 +64,11 @@ def _prev_group(per: np.ndarray, key: np.ndarray) -> np.ndarray:
     return np.concatenate([[np.nan], per[:-1]])[pos]
 
 
-def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold) -> pd.DataFrame:
+def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold, limits: bool = True) -> pd.DataFrame:
     """One position at a time.  d[j] != 0: enter at the open of bar j + 1 with stop[j].  flat[k]: close at the open
     of bar k.  lvl_l / lvl_s: stop levels known at the open of bar k (the stop only tightens).  A trade that is
-    still running at the last bar is reported as OPEN, marked at the last close."""
+    still running at the last bar is reported as OPEN, marked at the last close.  limits: skip entries whose stop is
+    nearer than MIN_RISK_ATR or further than MAX_RISK_ATR (off: any stop on the right side of the entry)."""
     n, rows, i = len(c), [], 1
     while i < n:
         j = i - 1
@@ -65,7 +78,7 @@ def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold) -> pd.DataF
             continue
         ep, sp = o[i], stop[j]
         risk = di * (ep - sp)
-        if not (risk >= MIN_RISK_ATR * a) or risk > MAX_RISK_ATR * a:
+        if not (risk > 0) or (limits and (not (risk >= MIN_RISK_ATR * a) or risk > MAX_RISK_ATR * a)):
             i += 1
             continue
         x, xp, why, at_open = -1, 0.0, "time", False
@@ -129,8 +142,43 @@ def gold_asia_trades(df: pd.DataFrame) -> pd.DataFrame:
     return _simulate(t, o, h, l, c, atr, d, c - 3 * atr, df["time"].dt.hour.to_numpy() == 7, nan, nan, 120)
 
 
+def gold_pmfix_trades(df: pd.DataFrame) -> pd.DataFrame:
+    t, o, h, l, c, atr = _arrays(df)
+    n = len(c)
+    london = df["time"].dt.tz_convert("Europe/London").dt.hour.to_numpy()
+    d = np.zeros(n, int)
+    d[:-1] = (london[1:] == 15).astype(int)
+    nan = np.full(n, np.nan)
+    return _simulate(t, o, h, l, c, atr, d, c - 3 * atr, london == 8, nan, nan, 120)
+
+
+def gold_ema_trades(df: pd.DataFrame) -> pd.DataFrame:
+    t, o, h, l, c, atr = _arrays(df)
+    n = len(c)
+    e9, e21 = (pd.Series(c).ewm(span=k, adjust=False).mean().to_numpy() for k in (9, 21))
+    above, below = e9 > e21, e21 > e9
+    up = above & np.concatenate([[False], (e9 <= e21)[:-1]]) & (np.arange(n) >= 63)
+    dn = below & np.concatenate([[False], (e21 <= e9)[:-1]])
+    flat = np.concatenate([[False], dn[:-1]])                    # out at the open after the cross back
+    nan = np.full(n, np.nan)
+    return _simulate(t, o, h, l, c, atr, up.astype(int), c - 2 * atr, flat, nan, nan, 10 ** 6, limits=False)
+
+
+def gold_fomc_trades(df: pd.DataFrame) -> pd.DataFrame:
+    t, o, h, l, c, atr = _arrays(df)
+    n = len(c)
+    ny = df["time"].dt.tz_convert("America/New_York")
+    ev = (ny.dt.hour.to_numpy() == 14) & ny.dt.strftime("%Y-%m-%d").isin(FOMC_DAYS).to_numpy()
+    move = c - o
+    ok = ev & (np.abs(move) >= 0.5 * atr)
+    d = np.where(ok & (move > 0), 1, np.where(ok & (move < 0), -1, 0))
+    nan = np.full(n, np.nan)
+    return _simulate(t, o, h, l, c, atr, d, np.where(d > 0, c - 2 * atr, c + 2 * atr), np.zeros(n, bool), nan, nan, 24)
+
+
 RUN = {"breakout_nextday": lambda df: breakout_trades(df, False), "breakout_trail": lambda df: breakout_trades(df, True),
-       "gold_asia": gold_asia_trades}
+       "gold_asia": gold_asia_trades, "gold_pmfix": gold_pmfix_trades, "gold_ema921": gold_ema_trades,
+       "gold_fomc": gold_fomc_trades}
 
 
 # -- one pass ------------------------------------------------------------------------------------
@@ -157,7 +205,7 @@ def run_once(gw, now: datetime | None = None) -> dict:
             spec = gw.get_spec(s)
             cost_px = 1.5 * float(spec.spread_points) * float(spec.point) if spec else 0.0
             tr = RUN[idea](df)
-            tr = tr[pd.to_datetime(tr["entry"], utc=True) >= PAPER_START]
+            tr = tr[pd.to_datetime(tr["entry"], utc=True) >= START.get(idea, PAPER_START)]
             frames.append(tr.assign(idea=idea, symbol=s, cost_R=cost_px / tr["risk_px"] if len(tr) else []))
     tr = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLS + ["idea", "symbol", "cost_R"])
     if len(tr):
