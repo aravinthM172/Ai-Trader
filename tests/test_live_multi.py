@@ -363,3 +363,40 @@ def test_sync_closed_ignores_deals_of_other_positions(tmp_path):
     _open_trade(c, 7)
     lm._sync_closed(_DealGW([_deal(99, 0, 0, 50.0)]), c, {26118201})
     assert c.execute("SELECT COUNT(*) FROM trades WHERE status='CLOSED'").fetchone()[0] == 0
+
+
+# ---- strong-signal-only symbols (MULTI_STRONG_ONLY_SYMBOLS) ------------------------------
+def _strong_call(monkeypatch, decision, rsi, strong_only=frozenset({"NDX100"})):
+    monkeypatch.setattr(lm, "LONG_ONLY_SYMBOLS", set())
+    monkeypatch.setattr(lm, "REGIME_SYMBOLS", set())
+    monkeypatch.setattr(lm, "STRONG_ONLY_SYMBOLS", set(strong_only))
+    monkeypatch.setattr(lm, "STRONG_RSI", 65.0)
+    monkeypatch.setattr(lm.btc_h1_signal, "generate",
+                        lambda s, done: _NS(decision=decision, signal_bar_utc="sig", features={"rsi14": rsi}))
+    news = _NS(blocking_event=lambda s, now: {"event": "CPI"}, is_blocked=lambda s, now: True)
+    bars = _RegimeGw(None).get_rates("NDX100", "H1", 400)
+    due = bars.time.iloc[-2].isoformat()
+    now = (bars.time.iloc[-1] + pd.Timedelta(minutes=5)).to_pydatetime()
+    return lm._evaluate_symbol(_RegimeGw(None), None, None, "NDX100", object(), "Indices", due, now, 5000.0,
+                               news, None, False, {})
+
+
+def test_strong_only_blocks_a_weak_buy_and_a_weak_sell(monkeypatch):
+    for decision, rsi in (("BUY", 62.0), ("SELL", 37.0)):
+        res = _strong_call(monkeypatch, decision, rsi)
+        assert res["decision"] == "blocked" and res["final"] is True and res["reason"].startswith("weak signal")
+
+
+def test_strong_only_lets_a_strong_signal_through(monkeypatch):
+    for decision, rsi in (("BUY", 65.0), ("SELL", 35.0)):
+        assert "news" in _strong_call(monkeypatch, decision, rsi).get("reason", "")      # passed, stopped by the next check
+
+
+def test_strong_only_does_not_touch_other_symbols(monkeypatch):
+    assert "news" in _strong_call(monkeypatch, "BUY", 61.0, strong_only=frozenset({"XAUUSD"})).get("reason", "")
+
+
+def test_strong_only_blocks_when_the_rsi_is_missing(monkeypatch):
+    monkeypatch.setattr(lm, "STRONG_ONLY_SYMBOLS", {"NDX100"})
+    res = _strong_call(monkeypatch, "BUY", float("nan"))
+    assert res["decision"] == "blocked"

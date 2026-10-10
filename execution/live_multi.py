@@ -120,6 +120,12 @@ REGIME_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_REGIME_SYMBOLS", "
 # (backtest/long_history_backtest.py, live setup): NDX100 sells -0.25R/trade over 13 yrs (also -0.32R on daily bars
 # since 1986), USDJPY sells -0.07R vs buys +0.22R.
 LONG_ONLY_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_LONG_ONLY_SYMBOLS", ""))
+# strong-signal-only symbols, e.g. MULTI_STRONG_ONLY_SYMBOLS=XAUUSD,NDX100: a BUY needs RSI14 >= MULTI_STRONG_RSI (65), a
+# SELL RSI14 <= 100 - MULTI_STRONG_RSI; weaker signals are skipped.  For markets whose smallest lot is above the
+# planned risk: backtest 2026-10-10 at the lot sizes really traded -- gold + NDX100 on every signal 13.7 % challenge
+# fails, on strong signals only 2.9 % (pooled +0.26R per trade for the strongest third against +0.10 to +0.13R).
+STRONG_ONLY_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_STRONG_ONLY_SYMBOLS", ""))
+STRONG_RSI = _env_f("MULTI_STRONG_RSI", 65.0)
 # per-symbol ceiling on one trade's risk, e.g. MULTI_SYMBOL_MAX_RISK=NDX100=0.004: a min lot above it is skipped.
 # Can only tighten MULTI_MAX_RISK_PER_TRADE (the parser rejects larger values).
 SYMBOL_MAX_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_MAX_RISK", ""))
@@ -469,6 +475,10 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
     out = {"decision": sig.decision, "signal_bar_utc": sig.signal_bar_utc}
     if sig.decision == "SELL" and s in LONG_ONLY_SYMBOLS:
         return {**out, "decision": "blocked", "reason": "buy-only symbol", "final": True}
+    if s in STRONG_ONLY_SYMBOLS:
+        rsi = float((getattr(sig, "features", None) or {}).get("rsi14", float("nan")))
+        if not (rsi >= STRONG_RSI if sig.decision == "BUY" else rsi <= 100 - STRONG_RSI):
+            return {**out, "decision": "blocked", "reason": f"weak signal: RSI {rsi:.1f}", "final": True}
     if s in REGIME_SYMBOLS:
         allowed, why = regime_filter.side200(sig.decision, gw.get_rates(s, "D1", regime_filter.D1_BARS), now)
         if allowed is None:                                  # no daily data yet: try again next pass
