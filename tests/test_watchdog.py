@@ -156,3 +156,16 @@ def test_btc_bot_watched_when_it_is_the_active_bot(tmp_path, monkeypatch):
     _status(tmp_path / "s.json", age_min=600)
     _, calls = _run(tmp_path, {}, procs=[MT5])
     assert calls["restart"] == 1
+
+
+def test_startup_line_reports_the_multi_trader_when_it_is_the_active_bot(tmp_path, monkeypatch):
+    ms = tmp_path / "multi.json"
+    ms.write_text('{"mode": "LIVE", "equity": 4985.11, "peak_equity": 5000.0, "open_positions": [1, 2], '
+                  '"closed_trades": 14, "net_pl_usd": -9.7, "expectancy_R": -0.05}', encoding="utf-8")
+    monkeypatch.setattr(wd, "MULTI_STATUS", ms)
+    monkeypatch.setattr(wd, "multi_enabled", lambda: True)
+    monkeypatch.setattr(wd, "btc_bot_watched", lambda: False)
+    line = wd.startup_line()
+    assert line.startswith("[multi] LIVE | equity $4985.11") and "open 2 | closed 14" in line
+    monkeypatch.setattr(wd, "multi_enabled", lambda: False)      # BTC-only set-up keeps the old line
+    assert "[multi]" not in wd.startup_line()

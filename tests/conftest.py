@@ -19,6 +19,9 @@ if str(ROOT) not in sys.path:
 
 
 def _mt5_live() -> bool:
+    # Opt-in only: the bot lives on the VPS, and a plain test run must never log into a local terminal.
+    if os.getenv("RUN_MT5_TESTS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return False
     try:
         import MetaTrader5 as mt5
     except Exception:
@@ -33,7 +36,7 @@ def _mt5_live() -> bool:
 
 
 MT5_LIVE = _mt5_live()
-requires_mt5 = pytest.mark.skipif(not MT5_LIVE, reason="MT5 terminal not connected")
+requires_mt5 = pytest.mark.skipif(not MT5_LIVE, reason="MT5 tests are opt-in (RUN_MT5_TESTS=1)")
 
 
 class FakeSpec:

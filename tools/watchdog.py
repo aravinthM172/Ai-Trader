@@ -278,6 +278,22 @@ def multi_enabled() -> bool:
     return MULTI_STATUS.exists() if v == "auto" else v in ("1", "true", "yes", "on")
 
 
+def multi_status_line(ms: dict | None) -> str:
+    if not ms:
+        return "[multi] no status file"
+    return (f"[multi] {ms.get('mode')} | equity ${ms.get('equity')} (peak ${ms.get('peak_equity')}) | "
+            f"open {len(ms.get('open_positions') or [])} | closed {ms.get('closed_trades')} "
+            f"net ${ms.get('net_pl_usd')} expR {ms.get('expectancy_R')}")
+
+
+def startup_line() -> str:
+    """Status of the bot(s) actually watched -- not the old BTC-only file when only the multi trader runs."""
+    parts = [status_line(read_status())] if btc_bot_watched() or not multi_enabled() else []
+    if multi_enabled():
+        parts.append(multi_status_line(read_status(MULTI_STATUS)))
+    return " || ".join(parts)
+
+
 def launch_multi() -> None:
     subprocess.Popen(["cmd", "/c", "start", "", "/min", str(MULTI_BAT)], cwd=str(ROOT),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -376,9 +392,7 @@ def handle_commands(cmds: list[str], kill=KILL, status_path=STATUS) -> list[str]
                                f"(target ${ch.get('target_usd')}) | days {len(ch.get('trading_days') or [])} | "
                                f"headroom today ${ch.get('daily_headroom_usd')}, total ${ch.get('total_headroom_usd')}")
             if ms:
-                replies.append(f"[multi] {ms.get('mode')} | equity ${ms.get('equity')} (peak ${ms.get('peak_equity')}) | "
-                               f"open {len(ms.get('open_positions') or [])} | closed {ms.get('closed_trades')} "
-                               f"net ${ms.get('net_pl_usd')} expR {ms.get('expectancy_R')}")
+                replies.append(multi_status_line(ms))
         elif cmd == "/kill":
             kill.parent.mkdir(exist_ok=True)
             kill.write_text(f"{datetime.now(timezone.utc).isoformat()}  telegram /kill\n", encoding="utf-8")
@@ -416,7 +430,7 @@ def main() -> int:
         for msg in msgs:
             print(msg)
         return 0
-    notify.send("watchdog started: " + status_line(read_status()))
+    notify.send("watchdog started: " + startup_line())
     while True:
         try:
             now, procs = datetime.now(timezone.utc), processes()
