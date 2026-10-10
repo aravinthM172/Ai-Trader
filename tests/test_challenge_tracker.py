@@ -80,3 +80,22 @@ def test_recent_trade_resets_inactivity_clock():
     ct.update(st, now=T0 + timedelta(days=29), equity=5000, balance=5000, traded_days=set(),
               last_closed=T0 + timedelta(days=25))
     assert st["result"] == "in_progress" and st["days_since_last_closed_trade"] == 4.0
+
+
+def test_weekend_closes_are_not_trading_days_or_activity(tmp_path):
+    import sqlite3
+    db = tmp_path / "t.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE trades (opened_utc TEXT, closed_utc TEXT, status TEXT)")
+    c.executemany("INSERT INTO trades VALUES (?,?,?)", [
+        ("2026-10-08T10:00:00+00:00", "2026-10-09T20:00:00+00:00", "CLOSED"),   # closed Friday before the roll: counts
+        ("2026-10-09T12:00:00+00:00", "2026-10-10T12:00:00+00:00", "CLOSED"),   # weekday open, Saturday close: no
+        ("2026-10-10T13:00:00+00:00", "2026-10-11T20:00:00+00:00", "CLOSED"),   # all weekend: no
+        ("2026-10-11T10:00:00+00:00", "2026-10-11T22:00:00+00:00", "CLOSED"),   # weekend open, Monday (firm day) close: counts
+        ("2026-10-12T10:00:00+00:00", None, "OPEN"),                            # still open: no
+    ])
+    c.commit()
+    c.close()
+    assert ct._traded_days(db, 21) == {"2026-10-09", "2026-10-12"}
+    assert ct._last_closed(db, 21) == datetime.fromisoformat("2026-10-11T22:00:00+00:00")
+    assert ct._last_closed(tmp_path / "none.sqlite") is None

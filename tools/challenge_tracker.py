@@ -134,26 +134,33 @@ def update(st: dict, *, now: datetime, equity: float, balance: float, traded_day
 
 
 # -- file wiring -------------------------------------------------------------------
+def is_weekend_day(day: str) -> bool:
+    """True when a firm trading-day label (see trading_day) falls on Saturday or Sunday, i.e. the time was
+    between the Friday and the Sunday 21:00 UTC day rolls -- the hours when only crypto trades."""
+    return datetime.strptime(day, "%Y-%m-%d").weekday() >= 5
+
+
+def _counted_closes(db: Path, reset_hour: int) -> list[datetime]:
+    """Close times of completed trades that the firm counts.  FundingPips (help centre, 2026-10-10): only a fully
+    closed trade is activity, and a crypto trade closed over the weekend is neither a trading day nor activity
+    (opened at the weekend and closed on a weekday counts on the day it is closed)."""
+    if not db.exists():
+        return []
+    c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = c.execute("SELECT closed_utc FROM trades WHERE status='CLOSED' AND closed_utc IS NOT NULL")
+        times = [datetime.fromisoformat(r[0]) for r in rows if r[0]]
+    finally:
+        c.close()
+    return [t for t in times if not is_weekend_day(trading_day(t, reset_hour))]
+
+
 def _traded_days(db: Path, reset_hour: int) -> set[str]:
-    if not db.exists():
-        return set()
-    c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
-    try:
-        rows = c.execute("SELECT opened_utc FROM trades UNION SELECT closed_utc FROM trades WHERE closed_utc IS NOT NULL")
-        return {trading_day(datetime.fromisoformat(r[0]), reset_hour) for r in rows if r[0]}
-    finally:
-        c.close()
+    return {trading_day(t, reset_hour) for t in _counted_closes(db, reset_hour)}
 
 
-def _last_closed(db: Path) -> datetime | None:
-    if not db.exists():
-        return None
-    c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
-    try:
-        r = c.execute("SELECT MAX(closed_utc) FROM trades WHERE status='CLOSED'").fetchone()
-        return datetime.fromisoformat(r[0]) if r and r[0] else None
-    finally:
-        c.close()
+def _last_closed(db: Path, reset_hour: int = FUNDINGPIPS_2STEP_STANDARD.day_reset_utc_hour) -> datetime | None:
+    return max(_counted_closes(db, reset_hour), default=None)
 
 
 def enabled() -> bool:
@@ -177,7 +184,8 @@ def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: 
     except Exception:
         st = new_state(balance, now, rules)
     ev = update(st, now=now, equity=equity, balance=balance,
-                traded_days=_traded_days(db, rules.day_reset_utc_hour), rules=rules, last_closed=_last_closed(db))
+                traded_days=_traded_days(db, rules.day_reset_utc_hour), rules=rules,
+                last_closed=_last_closed(db, rules.day_reset_utc_hour))
     state_path.parent.mkdir(exist_ok=True)
     state_path.write_text(json.dumps(st, indent=2), encoding="utf-8")
     out.write_text(json.dumps(st, indent=2), encoding="utf-8")
