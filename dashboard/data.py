@@ -421,6 +421,15 @@ def add_blocks(mkt: dict, open_positions: list[dict]) -> None:
                                long_only=s in long_only)
 
 
+def tests_table(reports: Path = R, now: datetime | None = None) -> dict | None:
+    """The live trader and every paper test in one table (tools/paper_report.py); None if it cannot be built."""
+    try:
+        from tools import paper_report
+        return paper_report.collect(reports, now)
+    except Exception:
+        return None
+
+
 def gather() -> dict:
     now = datetime.now(timezone.utc)
     ms, bs = _json(FILES["multi_status"]), _json(FILES["btc_status"])
@@ -470,4 +479,5 @@ def gather() -> dict:
         "edge": edge,
         "alerts": alerts,
         "strength": symbol_strength(trades),
+        "tests": tests_table(now=now),
     }

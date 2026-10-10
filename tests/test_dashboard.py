@@ -458,3 +458,19 @@ def test_order_blocks_buy_only():
     kw = dict(open_positions=[], groups={}, max_per_group=1, regime=None)
     assert dd.order_blocks("NDX100", "SELL", long_only=True, **kw) == ["buy-only symbol (MULTI_LONG_ONLY_SYMBOLS)"]
     assert dd.order_blocks("NDX100", "BUY", long_only=True, **kw) == []
+
+
+def test_snapshot_tests_table_lists_live_and_paper_rows(tmp_path):
+    from pathlib import Path
+
+    from dashboard import data
+    (tmp_path / "multi_live_status.json").write_text('{"generated_utc": "2026-10-10T18:01:00", "closed_trades": 15, '
+                                                     '"open_positions": [1], "expectancy_R": 0.017, "net_pl_usd": -10.02}')
+    (tmp_path / "paper_ml_filter_status.json").write_text(
+        '{"generated_utc": "2026-10-10T18:01:00", "open_scored": 1, "taken": {"closed": 5, "avg_R": -0.497, "total_R": -2.48}, '
+        '"skipped": {"closed": 10, "avg_R": 0.273, "total_R": 2.73}, "verdict": "keep watching"}')
+    t = data.tests_table(tmp_path)
+    assert [r["group"] for r in t["rows"]] == ["LIVE", "paper ML filter", "paper ML filter"]
+    assert t["rows"][1]["note"] == "keep watching" and "paper_ideas_status.json" in t["missing"]
+    page = (Path(data.__file__).parent / "index.html").read_text(encoding="utf-8")
+    assert 'id="tests"' in page and "renderTests" in page

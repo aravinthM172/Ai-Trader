@@ -198,6 +198,12 @@ button.theme { margin-left: auto; }
     <div class="card"><h2>Live vs backtest</h2><div id="edge"></div></div>
   </section>
 
+  <section class="card" style="margin-top:12px" aria-label="All tests">
+    <h2>All tests · live and paper <span class="small muted" id="testsSummary" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></h2>
+    <div class="scroll" id="tests"></div>
+    <div class="small muted" style="margin-top:6px">R = one unit of risk per trade. Paper tests send no orders. The ML filter rows split the live trades into the ones the filter would have taken and skipped.</div>
+  </section>
+
   <details class="card" style="margin-top:12px" id="strengthBox">
     <summary><h2>Strong symbols</h2><span class="small muted" id="strengthSummary"></span></summary>
     <div class="scroll" id="strength"></div>
@@ -615,6 +621,18 @@ function renderTables() {
     ["live_net_usd", "Live P/L", (v, r) => r.live_trades ? plSpan(v) : "–", 1], ["live_avg_R", "Live avg R", (v) => rSpan(v), 1]]));
 }
 
+function renderTests() {
+  const t = S.tests, rows = (t && t.rows) || [];
+  const verdict = (rows.find((r) => r.group === "paper ML filter" && r.note) || {}).note;
+  $("testsSummary").textContent = !t ? "not available yet" :
+    `${rows.filter((r) => r.group !== "LIVE").length} paper tests` + (verdict ? ` · ML filter: ${verdict}` : "") +
+    (t.missing && t.missing.length ? ` · no data yet: ${t.missing.map((m) => m.replace("_status.json", "")).join(", ")}` : "");
+  $("tests").replaceChildren(table(rows, [["group", "Group", (v) => v === "LIVE" ? chip("good", "LIVE") : v], ["test", "Test"],
+    ["closed", "Closed", (v) => v ?? "–", 1], ["open", "Open", (v) => v ?? "–", 1], ["avg_R", "Avg R", (v) => rSpan(v), 1],
+    ["total_R", "Total R", (v) => rSpan(v), 1], ["updated_utc", "Updated (UTC)", (v) => (v || "–").replace("T", " ")],
+    ["note", "Note", (v) => v || ""]]));
+}
+
 function renderEquity() {
   const h = (S.equity_history || []).map((p) => ({ time: p.time, value: p.equity }));
   const curve = h.length > 1 ? h : (S.equity_curve || []);
@@ -626,7 +644,7 @@ function render() {
   if (!S) return;
   if (S.error) { $("updated").textContent = S.error; return; }
   // each panel is independent: one failing must not stop the others
-  for (const f of [renderHeader, renderTiles, renderRules, renderTfs, renderCharts, renderSignalTable, renderNext, renderEquity, renderTables])
+  for (const f of [renderHeader, renderTiles, renderRules, renderTfs, renderCharts, renderSignalTable, renderNext, renderEquity, renderTables, renderTests])
     try { f(); } catch (e) { console.error(f.name, e); }
 }
 async function load() {
