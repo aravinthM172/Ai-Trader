@@ -48,9 +48,10 @@ from common.logging_setup import get_logger
 from execution import safety
 from execution.order_validator import build_request
 from news.filter import NewsFilter
+from risk import margin_cap
 from risk import portfolio_guard as pg
 from risk import prop_controls
-from strategy import btc_h1_signal, regime_filter
+from strategy import btc_h1_signal, calm_filter, regime_filter, reversal_exit
 
 load_dotenv()
 log = get_logger("multi.live", filename="multi_live.log")
@@ -129,6 +130,23 @@ STRONG_RSI = _env_f("MULTI_STRONG_RSI", 65.0)
 # per-symbol ceiling on one trade's risk, e.g. MULTI_SYMBOL_MAX_RISK=NDX100=0.004: a min lot above it is skipped.
 # Can only tighten MULTI_MAX_RISK_PER_TRADE (the parser rejects larger values).
 SYMBOL_MAX_RISK = parse_symbol_risk(os.getenv("MULTI_SYMBOL_MAX_RISK", ""))
+# calm-market-only symbols (strategy/calm_filter.py), e.g. MULTI_CALM_ONLY_SYMBOLS=BTCUSD,ETHUSD: a signal is skipped
+# when ATR % of price is at least MULTI_CALM_MAX_RATIO (1.2) x its 30-day median.  Backtest 2026-10-13: BTCUSD calm
+# entries +0.23R against +0.06R, ETHUSD +0.25R against +0.02R; no effect on gold, USDJPY or NDX100.
+CALM_ONLY_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_CALM_ONLY_SYMBOLS", ""))
+CALM_MAX_RATIO = _env_f("MULTI_CALM_MAX_RATIO", calm_filter.MAX_RATIO)
+# cap on the total value of the open positions in these symbols, as a share of equity (risk/margin_cap.py), e.g.
+# MULTI_NOTIONAL_CAP_SYMBOLS=BTCUSD,ETHUSD with MULTI_NOTIONAL_CAP=0.6.  FundedNext: crypto at 1:1 leverage and
+# "70 % or more" margin use counts as gambling.  A capped trade is smaller than its risk budget, never bigger.
+NOTIONAL_CAP_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_NOTIONAL_CAP_SYMBOLS", ""))
+NOTIONAL_CAP = _env_f("MULTI_NOTIONAL_CAP", 0.0)
+# reversal exit (strategy/reversal_exit.py) for these symbols, e.g. MULTI_REVERSAL_EXIT_SYMBOLS=BTCUSD,ETHUSD: a trade
+# at least MULTI_REVERSAL_MIN_PROFIT_ATR (2) x its entry ATR in profit is closed when the last completed H1 candle is
+# against it and at least MULTI_REVERSAL_CANDLE_ATR (1.5) x ATR tall.  Backtest 2026-10-14: same profit on BTCUSD and
+# ETHUSD, worst drawdown about a quarter lower, win rate 33 % -> 37 %.
+REVERSAL_EXIT_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_REVERSAL_EXIT_SYMBOLS", ""))
+REVERSAL_MIN_PROFIT_ATR = _env_f("MULTI_REVERSAL_MIN_PROFIT_ATR", reversal_exit.MIN_PROFIT_ATR)
+REVERSAL_CANDLE_ATR = _env_f("MULTI_REVERSAL_CANDLE_ATR", reversal_exit.CANDLE_ATR)
 
 
 def symbol_max_risk(symbol: str) -> float:
@@ -364,6 +382,37 @@ def _send(gw, spec, direction, volume, sl_d, tp_d, magic, c) -> dict:
     return {"ok": True, "ticket": pos["ticket"], "fill": pos["price_open"], "sl": pos["sl"], "tp": pos["tp"]}
 
 
+_REVERSAL_LOGGED: set = set()          # (ticket, bar) already reported, so a dry run does not repeat itself
+
+
+def _reversal_exit(gw, c, p, spec, now, close_ok: bool) -> bool:
+    """Close a position that is well in profit when a big hourly candle goes against it (strategy/reversal_exit.py).
+    Only the last completed bar is judged, so it acts at the start of the next hour.  close_ok false: logged only."""
+    row = c.execute("SELECT entry, atr, opened_utc FROM trades WHERE ticket=?", (p["ticket"],)).fetchone()
+    if not row or not row[0] or not row[1] or not row[2]:
+        return False
+    bars = gw.get_rates(p["symbol"], "H1", reversal_exit.H1_BARS)
+    if bars is None or bars.empty:
+        return False
+    done = completed_bars(bars, now)
+    hit, why = reversal_exit.check(done, direction=p["type"], entry=float(row[0]), atr_entry=float(row[1]),
+                                   opened=datetime.fromisoformat(row[2]), min_profit_atr=REVERSAL_MIN_PROFIT_ATR,
+                                   candle_atr=REVERSAL_CANDLE_ATR)
+    if not hit:
+        return False
+    key = (p["ticket"], str(done["time"].iloc[-1]))
+    if close_ok:
+        ok = _close(gw, spec, p, "reversal", c)
+    else:
+        ok = False
+        if key not in _REVERSAL_LOGGED:
+            _event(c, "would_close", {"ticket": p["ticket"], "symbol": p["symbol"], "reason": "reversal"})
+    if close_ok or key not in _REVERSAL_LOGGED:
+        log.warning("REVERSAL EXIT %s #%s %s: %s", "CLOSE" if close_ok else "WOULD CLOSE", p["ticket"], p["symbol"], why)
+    _REVERSAL_LOGGED.add(key)
+    return ok
+
+
 # -- one pass ---------------------------------------------------------------------------
 def run_once(*, now: datetime | None = None) -> dict:
     from mt5.gateway import MT5Gateway
@@ -411,6 +460,8 @@ def run_once(*, now: datetime | None = None) -> dict:
                 row = c.execute("SELECT sl, tp FROM trades WHERE ticket=?", (p["ticket"],)).fetchone()
                 if not (row and _ensure_sl(gw, spec, p, row[0], row[1], c)):
                     _close(gw, spec, p, "no_sl", c)
+            elif p["symbol"] in REVERSAL_EXIT_SYMBOLS:
+                _reversal_exit(gw, c, p, spec, now, close_allowed(acct))
         mine = [p for p in gw.positions() if p["magic"] in magics]
 
         # prop-firm controls (only when a challenge rehearsal / prop account is configured)
@@ -443,9 +494,14 @@ def run_once(*, now: datetime | None = None) -> dict:
                 key = f"{s}|{due}"
                 if key in evaluated:
                     continue
+                cap_used = 0.0
+                if s in NOTIONAL_CAP_SYMBOLS and NOTIONAL_CAP > 0:      # read again: an order sent this pass counts
+                    cap_used = margin_cap.used_notional(
+                        gw.positions(), {k: v.contract_size for k, v in specs.items() if v is not None},
+                        NOTIONAL_CAP_SYMBOLS)
                 status["entries"][s] = res = _evaluate_symbol(
                     gw, mt5, c, s, specs[s], groups[s], due, now, equity, news, gst, send_ok, ls,
-                    risk=min(symbol_risk(s), prop.risk_cap) if prop is not None else symbol_risk(s))
+                    risk=min(symbol_risk(s), prop.risk_cap) if prop is not None else symbol_risk(s), cap_used=cap_used)
                 if res.get("final"):
                     evaluated[key] = res.get("decision", "done")
         ls["evaluated"] = dict(sorted(evaluated.items())[-2000:])
@@ -461,7 +517,7 @@ def run_once(*, now: datetime | None = None) -> dict:
 
 
 def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, send_ok, ls,
-                     risk: float = RISK_PER_TRADE) -> dict:
+                     risk: float = RISK_PER_TRADE, cap_used: float = 0.0) -> dict:
     if spec is None:
         return {"decision": "skip", "reason": "no symbol spec", "final": True}
     df = gw.get_rates(s, "H1", 400)
@@ -486,6 +542,13 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
             return {**out, "decision": "retry", "reason": f"regime: {why}"}
         if not allowed:
             return {**out, "decision": "blocked", "reason": f"regime: {why}", "final": True}
+    if s in CALM_ONLY_SYMBOLS:
+        wide = gw.get_rates(s, "H1", calm_filter.H1_BARS)
+        calm, why = calm_filter.allowed(None if wide is None or wide.empty else completed_bars(wide, now), CALM_MAX_RATIO)
+        if calm is None:                                     # not enough bars yet: try again next pass
+            return {**out, "decision": "retry", "reason": f"calm filter: {why}"}
+        if not calm:
+            return {**out, "decision": "blocked", "reason": f"jumpy market: {why}", "final": True}
     ev = news.blocking_event(s, now)
     if news.is_blocked(s, now):
         return {**out, "decision": "blocked", "reason": f"news: {ev['event'] if ev else 'calendar unavailable'}", "final": True}
@@ -508,6 +571,15 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
                                       vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
     if vol <= 0:
         return {**out, "decision": "skip", "reason": note, "final": True}
+    if s in NOTIONAL_CAP_SYMBOLS and NOTIONAL_CAP > 0:
+        full = vol
+        vol, cnote = margin_cap.cap_volume(vol, price=px, contract_size=spec.contract_size, equity=equity, used=cap_used,
+                                           max_frac=NOTIONAL_CAP, vstep=spec.volume_step, vmin=spec.volume_min)
+        if vol <= 0:
+            return {**out, "decision": "skip", "reason": cnote, "final": True}
+        if cnote != "ok":
+            risk_usd *= vol / full
+            log.info("%s sizing: %s", s, cnote)
     ok, why = pg.allow_entry(GUARD, gst, symbol=s, group=group, risk_frac=risk_usd / equity, now=now, equity=equity)
     if not ok:
         return {**out, "decision": "blocked", "reason": f"guard: {why}", "final": True}
@@ -571,7 +643,7 @@ def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok, close_
         ch = json.loads(ct.OUT.read_text(encoding="utf-8"))
     except Exception:
         ch = None
-    rules = ct.FUNDINGPIPS_2STEP_STANDARD
+    rules = ct.current_rules()                          # the firm named by PROP_CHALLENGE
     day = ct.trading_day(now, rules.day_reset_utc_hour)
     if ls.get("prop_day") != day:                       # firm baseline: higher of balance / equity at day start
         ls["prop_day"], ls["prop_day_ref"] = day, max(balance, equity)

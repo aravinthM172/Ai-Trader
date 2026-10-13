@@ -2,7 +2,8 @@
 Prop-challenge rehearsal tracker: follows a DEMO account exactly the way the prop firm
 would judge it, so the real challenge is bought only after the demo has passed.
 
-Default rules = FundingPips 2-Step Standard (verified 2026-10-04 from their checkout page
+The firm is named by PROP_CHALLENGE in .env: fundingpips_2step_standard (default) or fundednext_2step (see
+FUNDEDNEXT_2STEP below).  FundingPips 2-Step Standard (verified 2026-10-04 from their checkout page
 and help-centre excerpts):
   Phase 1: +8 % target, Phase 2: +5 % target, min 3 trading days per phase,
   daily loss 3 % or 5 % (bought option; PROP_DAILY_LOSS_LIMIT in .env, default 0.03 = the stricter one)
@@ -48,14 +49,33 @@ class ChallengeRules:
     max_loss: float = 0.10
     day_reset_utc_hour: int = 21        # FundingPips server time is UTC+3 -> trading day starts 21:00 UTC
     inactivity_days: int = 30           # hard breach: no completed trade within 30 consecutive days
+    weekend_counts: bool = False        # does a trade closed at the weekend count as a trading day / activity?
+    daily_base: str = "day_ref"         # daily loss as a share of: "day_ref" (day-start value) or "initial" (phase start)
 
 
 FUNDINGPIPS_2STEP_STANDARD = ChallengeRules()
+# FundedNext Stellar 2-Step (rules page, help centre and plans page read 2026-10-13): +8 % / +5 %, trades on 5
+# separate days per phase, daily loss 5 % of the INITIAL balance (closed + floating, swap and commission included,
+# reset 00:00 server time), max loss 10 % static, 60 days without a trade = deactivated.  No weekend exception is
+# stated.  Server clock: UTC+3 in summer (21:00 UTC roll), UTC+2 in winter -> PROP_DAY_RESET_UTC_HOUR=22 then.
+FUNDEDNEXT_2STEP = ChallengeRules(name="FundedNext Stellar 2-Step", min_days=(5, 5), daily_loss=0.05,
+                                  inactivity_days=60, weekend_counts=True, daily_base="initial")
+PRESETS = {"fundingpips_2step_standard": FUNDINGPIPS_2STEP_STANDARD, "fundednext_2step": FUNDEDNEXT_2STEP}
+
+
+def preset() -> ChallengeRules:
+    """The firm's rules named by PROP_CHALLENGE (unknown / legacy values such as "true": FundingPips)."""
+    return PRESETS.get(os.getenv("PROP_CHALLENGE", "").strip().lower(), FUNDINGPIPS_2STEP_STANDARD)
 
 
 def current_rules() -> ChallengeRules:
-    """Rules with the daily loss limit from PROP_DAILY_LOSS_LIMIT (read at call time, after .env is loaded)."""
-    return replace(FUNDINGPIPS_2STEP_STANDARD, daily_loss=float(os.getenv("PROP_DAILY_LOSS_LIMIT", "0.03")))
+    """The preset with the .env overrides, read at call time (after .env is loaded): PROP_DAILY_LOSS_LIMIT
+    (FundingPips default 0.03, the stricter bought option; other firms: their own limit) and
+    PROP_DAY_RESET_UTC_HOUR (the UTC hour at which the firm's trading day starts)."""
+    base = preset()
+    daily = "0.03" if base is FUNDINGPIPS_2STEP_STANDARD else str(base.daily_loss)
+    return replace(base, daily_loss=float(os.getenv("PROP_DAILY_LOSS_LIMIT", daily)),
+                   day_reset_utc_hour=int(float(os.getenv("PROP_DAY_RESET_UTC_HOUR", base.day_reset_utc_hour))))
 
 
 def trading_day(ts: datetime, reset_hour: int) -> str:
@@ -85,13 +105,14 @@ def update(st: dict, *, now: datetime, equity: float, balance: float, traded_day
     st["trading_days"] = sorted({d for d in traded_days if d >= trading_day(phase_start, rules.day_reset_utc_hour)}
                                 | set(st["trading_days"]))
     base = st["phase_start_balance"]
-    daily = (st["day_ref"] - equity) / st["day_ref"] if st["day_ref"] > 0 else 0.0
+    daily_ref = base if rules.daily_base == "initial" else st["day_ref"]       # what the daily limit is a share of
+    daily = (st["day_ref"] - equity) / daily_ref if daily_ref > 0 else 0.0
     total = (base - equity) / base
     st["worst_daily_loss"] = max(st["worst_daily_loss"], daily)
     st["worst_total_loss"] = max(st["worst_total_loss"], total)
     st["profit_pct"] = round(100 * (equity / base - 1), 2)
     st["daily_loss_pct"] = round(100 * daily, 2)
-    st["daily_headroom_usd"] = round(st["day_ref"] * rules.daily_loss - (st["day_ref"] - equity), 2)
+    st["daily_headroom_usd"] = round(daily_ref * rules.daily_loss - (st["day_ref"] - equity), 2)
     st["total_headroom_usd"] = round(base * rules.max_loss - (base - equity), 2)
     i = st["phase"] - 1
     st["target_usd"] = round(base * (1 + rules.targets[i]), 2)
@@ -140,10 +161,11 @@ def is_weekend_day(day: str) -> bool:
     return datetime.strptime(day, "%Y-%m-%d").weekday() >= 5
 
 
-def _counted_closes(db: Path, reset_hour: int) -> list[datetime]:
+def _counted_closes(db: Path, reset_hour: int, weekend_counts: bool = False) -> list[datetime]:
     """Close times of completed trades that the firm counts.  FundingPips (help centre, 2026-10-10): only a fully
     closed trade is activity, and a crypto trade closed over the weekend is neither a trading day nor activity
-    (opened at the weekend and closed on a weekday counts on the day it is closed)."""
+    (opened at the weekend and closed on a weekday counts on the day it is closed).  weekend_counts: firms without
+    that exception (FundedNext)."""
     if not db.exists():
         return []
     c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
@@ -152,19 +174,20 @@ def _counted_closes(db: Path, reset_hour: int) -> list[datetime]:
         times = [datetime.fromisoformat(r[0]) for r in rows if r[0]]
     finally:
         c.close()
-    return [t for t in times if not is_weekend_day(trading_day(t, reset_hour))]
+    return [t for t in times if weekend_counts or not is_weekend_day(trading_day(t, reset_hour))]
 
 
-def _traded_days(db: Path, reset_hour: int) -> set[str]:
-    return {trading_day(t, reset_hour) for t in _counted_closes(db, reset_hour)}
+def _traded_days(db: Path, reset_hour: int, weekend_counts: bool = False) -> set[str]:
+    return {trading_day(t, reset_hour) for t in _counted_closes(db, reset_hour, weekend_counts)}
 
 
-def _last_closed(db: Path, reset_hour: int = FUNDINGPIPS_2STEP_STANDARD.day_reset_utc_hour) -> datetime | None:
-    return max(_counted_closes(db, reset_hour), default=None)
+def _last_closed(db: Path, reset_hour: int = FUNDINGPIPS_2STEP_STANDARD.day_reset_utc_hour,
+                 weekend_counts: bool = False) -> datetime | None:
+    return max(_counted_closes(db, reset_hour, weekend_counts), default=None)
 
 
 def enabled() -> bool:
-    return os.getenv("PROP_CHALLENGE", "").strip().lower() in ("fundingpips_2step_standard", "1", "true", "on")
+    return os.getenv("PROP_CHALLENGE", "").strip().lower() in (*PRESETS, "1", "true", "on")
 
 
 def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: Path = DB,
@@ -184,8 +207,8 @@ def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: 
     except Exception:
         st = new_state(balance, now, rules)
     ev = update(st, now=now, equity=equity, balance=balance,
-                traded_days=_traded_days(db, rules.day_reset_utc_hour), rules=rules,
-                last_closed=_last_closed(db, rules.day_reset_utc_hour))
+                traded_days=_traded_days(db, rules.day_reset_utc_hour, rules.weekend_counts), rules=rules,
+                last_closed=_last_closed(db, rules.day_reset_utc_hour, rules.weekend_counts))
     state_path.parent.mkdir(exist_ok=True)
     state_path.write_text(json.dumps(st, indent=2), encoding="utf-8")
     out.write_text(json.dumps(st, indent=2), encoding="utf-8")
