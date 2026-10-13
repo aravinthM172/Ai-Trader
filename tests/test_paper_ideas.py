@@ -109,3 +109,37 @@ def test_a_running_trade_is_reported_open_and_never_duplicated(tmp_path, monkeyp
     rows = pd.read_sql("SELECT * FROM trades WHERE idea='breakout_nextday' AND symbol='BTCUSD'", sqlite3.connect(pi.DB))
     assert rows.entry.is_unique and (rows.status == "OPEN").sum() <= 1
     assert all(pd.to_datetime(rows.entry, utc=True) >= df.time.iloc[1000])
+
+
+def _daily(n=600, end="2025-01-01", rising=True):
+    t = pd.date_range(end=pd.Timestamp(end, tz="UTC") - pd.Timedelta(days=1), periods=n, freq="D")
+    c = np.linspace(100, 200, n) if rising else np.linspace(200, 100, n)
+    return pd.DataFrame(dict(time=t, close=c))
+
+
+def test_daily_up_reads_only_completed_days():
+    d1 = _daily(600, rising=False)
+    d1.loc[len(d1) - 1, "close"] = 500.0                           # the last day closes far above the average
+    last = d1.time.iloc[-1]
+    when = pd.Series([last + pd.Timedelta(hours=23), last + pd.Timedelta(days=1)])
+    assert pi.daily_up(when, d1).tolist() == [False, True]         # known only once that day has ended
+    assert not pi.daily_up(when, d1.iloc[-300:]).any()             # too little daily history: no trade
+    assert not pi.daily_up(when, None).any()
+
+
+def test_ndx_tight_follows_its_rules():
+    df = _bars(seed=23)
+    assert len(pi.ndx_tight_trades(df, _daily(rising=False))) == 0  # daily trend down: no buys
+    tr = _closed(pi.ndx_tight_trades(df, _daily()))
+    assert len(tr) > 50 and (tr.dir == 1).all()
+    c = df.close.to_numpy()
+    j = pd.Index(df.time).get_indexer(pd.to_datetime(tr.entry, utc=True)) - 1          # signal bar
+    atr = pi._arrays(df)[5]
+    assert (pi._rsi(c, 14)[j] >= 65).all() and (c[j] > c[j - 8]).all() and (c[j] > pi._ema(c, 96)[j]).all()
+    assert np.allclose(tr.risk_px, atr[j]) and np.allclose(tr.entry_px - tr.stop_px, atr[j])
+    assert set(tr.reason) <= {"stop", "target", "time"} and (tr.reason == "target").sum() > 5
+    at_open = np.isclose(tr.exit_px, df.open.to_numpy()[pd.Index(df.time).get_indexer(pd.to_datetime(tr.exit, utc=True))])
+    hit = tr[(tr.reason == "target") & ~at_open]
+    assert len(hit) and np.allclose(hit.R_gross, 3.0)              # target = 3 x the first risk
+    assert (tr[tr.reason == "target"].R_gross >= 3.0 - 1e-9).all() and (tr[tr.reason == "stop"].R_gross <= -1.0 + 1e-9).all()
+    assert (pd.to_datetime(tr.exit, utc=True) - pd.to_datetime(tr.entry, utc=True) <= pd.Timedelta(hours=96)).all()

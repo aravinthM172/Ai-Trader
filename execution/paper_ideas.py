@@ -1,5 +1,5 @@
 """
-Paper (dry-run) forward test of the research ideas of 2026-10-10 -- NEVER sends orders.
+Paper (dry-run) forward test of the research ideas of 2026-10-10 and later -- NEVER sends orders.
 
     python -m execution.paper_ideas            one pass (the hourly scheduled task "GoldAI Paper Ideas")
     python -m execution.paper_ideas --report   print the current standing
@@ -19,6 +19,10 @@ tests/test_paper_ideas.py checks them against the backtest):
                                       out at the open after the cross back.
   gold_fomc          XAUUSD           after the Fed announcement hour (14:00 New York on FOMC_DAYS) has closed with a
                                       move of at least 0.5 ATR: follow it for 24 hours, stop 2 ATR.
+  ndx_tight          NDX100           the live buy signal (RSI14 >= 65, 8-bar momentum > 0, close > EMA96, last
+                                      completed daily close above its EMA200) with a nearer stop: stop 1 ATR and
+                                      target 3 ATR from the entry (live: 2 / 6), 96 bars at most.  Added 2026-10-12:
+                                      about half the live risk per trade at the smallest lot.
 Day = broker day (rollover 21:00 UTC).  1 R = distance from entry to the first stop.  Costs: the symbol's spread at
 the time of the pass x 1.5 (spread + slippage); swaps and commission are not included.
 
@@ -39,7 +43,8 @@ import numpy as np
 import pandas as pd
 
 from common.logging_setup import get_logger
-from strategy.btc_features import _atr
+from strategy import regime_filter
+from strategy.btc_features import _atr, _ema, _rsi
 
 log = get_logger("paper.ideas", filename="paper_ideas.log")
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,9 +53,11 @@ STATUS = ROOT / "reports" / "paper_ideas_status.json"
 PAPER_START = pd.Timestamp("2026-10-10 10:00", tz="UTC")       # first hour after the rules were fixed
 WARMUP_DAYS = 40
 IDEAS = {"breakout_nextday": ("BTCUSD", "ETHUSD"), "breakout_trail": ("BTCUSD", "ETHUSD"), "gold_asia": ("XAUUSD",),
-         "gold_pmfix": ("XAUUSD",), "gold_ema921": ("XAUUSD",), "gold_fomc": ("XAUUSD",)}
+         "gold_pmfix": ("XAUUSD",), "gold_ema921": ("XAUUSD",), "gold_fomc": ("XAUUSD",), "ndx_tight": ("NDX100",)}
 # ideas added later count from their own start (gold was closed for the weekend when these three were added)
 START = {k: pd.Timestamp("2026-10-11 00:00", tz="UTC") for k in ("gold_pmfix", "gold_ema921", "gold_fomc")}
+START["ndx_tight"] = pd.Timestamp("2026-10-12 06:00", tz="UTC")
+NEEDS_D1 = ("ndx_tight",)                                      # ideas that also read daily candles (trend filter)
 FOMC_DAYS = ("2026-10-28", "2026-12-09")                       # scheduled announcements, 14:00 New York; extend each year
 MIN_RISK_ATR, MAX_RISK_ATR = 0.5, 6.0
 USD_PER_R = 12.5                                               # $5k x 0.25 %, for the dollar column only
@@ -64,11 +71,12 @@ def _prev_group(per: np.ndarray, key: np.ndarray) -> np.ndarray:
     return np.concatenate([[np.nan], per[:-1]])[pos]
 
 
-def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold, limits: bool = True) -> pd.DataFrame:
+def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold, limits: bool = True, rr: float = 0.0) -> pd.DataFrame:
     """One position at a time.  d[j] != 0: enter at the open of bar j + 1 with stop[j].  flat[k]: close at the open
     of bar k.  lvl_l / lvl_s: stop levels known at the open of bar k (the stop only tightens).  A trade that is
     still running at the last bar is reported as OPEN, marked at the last close.  limits: skip entries whose stop is
-    nearer than MIN_RISK_ATR or further than MAX_RISK_ATR (off: any stop on the right side of the entry)."""
+    nearer than MIN_RISK_ATR or further than MAX_RISK_ATR (off: any stop on the right side of the entry).
+    rr > 0: take profit at rr x the first risk from the entry (a bar that touches both counts as the stop)."""
     n, rows, i = len(c), [], 1
     while i < n:
         j = i - 1
@@ -82,6 +90,7 @@ def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold, limits: boo
             i += 1
             continue
         x, xp, why, at_open = -1, 0.0, "time", False
+        tgt = ep + di * rr * risk
         for k in range(i, min(n, i + hold)):
             if k > i:
                 if flat[k]:
@@ -96,6 +105,13 @@ def _simulate(t, o, h, l, c, atr, d, stop, flat, lvl_l, lvl_s, hold, limits: boo
             if (di > 0 and l[k] <= sp) or (di < 0 and h[k] >= sp):
                 x, xp, why = k, sp, "stop"
                 break
+            if rr > 0:
+                if k > i and di * (o[k] - tgt) >= 0:
+                    x, xp, why, at_open = k, o[k], "target", True
+                    break
+                if (di > 0 and h[k] >= tgt) or (di < 0 and l[k] <= tgt):
+                    x, xp, why = k, tgt, "target"
+                    break
         status = "CLOSED"
         if x < 0:
             if i + hold <= n - 1:
@@ -176,9 +192,36 @@ def gold_fomc_trades(df: pd.DataFrame) -> pd.DataFrame:
     return _simulate(t, o, h, l, c, atr, d, np.where(d > 0, c - 2 * atr, c + 2 * atr), np.zeros(n, bool), nan, nan, 24)
 
 
+def daily_up(when: pd.Series, d1: pd.DataFrame | None) -> np.ndarray:
+    """For each moment: is the last daily close completed by then above its EMA200 (strategy/regime_filter.py)?
+    False while fewer than regime_filter.MIN_BARS daily bars are complete."""
+    out = np.zeros(len(when), bool)
+    if d1 is None or len(d1) < regime_filter.MIN_BARS:
+        return out
+    d1 = d1.sort_values("time")
+    close = d1["close"].astype(float)
+    up = (close > close.ewm(span=regime_filter.EMA_LEN, adjust=False).mean()).to_numpy()
+    done = (pd.to_datetime(d1["time"], utc=True) + pd.Timedelta(days=1)).to_numpy()
+    k = np.searchsorted(done, pd.to_datetime(when, utc=True).to_numpy(), side="right") - 1    # last completed daily bar
+    ok = k >= regime_filter.MIN_BARS - 1
+    out[ok] = up[k[ok]]
+    return out
+
+
+def ndx_tight_trades(df: pd.DataFrame, d1: pd.DataFrame | None, stop_atr: float = 1.0, rr: float = 3.0,
+                     rsi_min: float = 65.0) -> pd.DataFrame:
+    t, o, h, l, c, atr = _arrays(df)
+    n = len(c)
+    mom = pd.Series(c).diff(8).to_numpy()
+    d = ((_rsi(c, 14) >= rsi_min) & (mom > 0) & (c > _ema(c, 96)) & daily_up(df["time"] + pd.Timedelta(hours=1), d1)).astype(int)
+    nan = np.full(n, np.nan)
+    stop = np.concatenate([o[1:], [np.nan]]) - stop_atr * atr     # from the entry price, as the live trader places it
+    return _simulate(t, o, h, l, c, atr, d, stop, np.zeros(n, bool), nan, nan, 96, rr=rr)
+
+
 RUN = {"breakout_nextday": lambda df: breakout_trades(df, False), "breakout_trail": lambda df: breakout_trades(df, True),
        "gold_asia": gold_asia_trades, "gold_pmfix": gold_pmfix_trades, "gold_ema921": gold_ema_trades,
-       "gold_fomc": gold_fomc_trades}
+       "gold_fomc": gold_fomc_trades, "ndx_tight": ndx_tight_trades}
 
 
 # -- one pass ------------------------------------------------------------------------------------
@@ -204,7 +247,11 @@ def run_once(gw, now: datetime | None = None) -> dict:
                 continue
             spec = gw.get_spec(s)
             cost_px = 1.5 * float(spec.spread_points) * float(spec.point) if spec else 0.0
-            tr = RUN[idea](df)
+            if idea in NEEDS_D1:
+                d1 = gw.get_rates(s, "D1", regime_filter.D1_BARS)
+                tr = RUN[idea](df, None if d1 is None else regime_filter.completed_daily(d1, now))
+            else:
+                tr = RUN[idea](df)
             tr = tr[pd.to_datetime(tr["entry"], utc=True) >= START.get(idea, PAPER_START)]
             frames.append(tr.assign(idea=idea, symbol=s, cost_R=cost_px / tr["risk_px"] if len(tr) else []))
     tr = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLS + ["idea", "symbol", "cost_R"])
