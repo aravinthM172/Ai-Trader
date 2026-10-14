@@ -39,6 +39,24 @@ MT5_LIVE = _mt5_live()
 requires_mt5 = pytest.mark.skipif(not MT5_LIVE, reason="MT5 tests are opt-in (RUN_MT5_TESTS=1)")
 
 
+def _block_mt5():
+    """Without RUN_MT5_TESTS, starting the laptop's MetaTrader from any test is an error, not a launch: the live
+    bot runs on the VPS, and a local terminal logging in to the same account must never happen."""
+    try:
+        import MetaTrader5 as mt5
+    except Exception:
+        return
+
+    def blocked(*a, **k):
+        raise RuntimeError("test tried to start the laptop MetaTrader (mt5.initialize); "
+                           "mock the gateway, or opt in with RUN_MT5_TESTS=1")
+    mt5.initialize = mt5.login = blocked
+
+
+if not MT5_LIVE:
+    _block_mt5()
+
+
 class FakeSpec:
     symbol = "BTCUSD.vx"
     description = "Bitcoin vs US Dollar"

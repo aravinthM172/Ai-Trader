@@ -42,18 +42,32 @@ server = MCPServer(
     name="gold-ai-trader",
     instructions="""Read-only view of the gold-ai-trader live bots. Nothing here can trade.
 
+THE LIVE BOT RUNS ON THE EZERHOST VPS (FundedNext $15K since 2026-10-13). The live_* tools read it there
+(one WinRM login, cached 60 s):
+- "Is everything OK?" / "is the bot running?"  -> live_health  (call first)
+- "Why didn't it trade?"                       -> live_decisions, then live_log(kind="problems")
+- "What trades happened?"                      -> live_trades
+- "How is the challenge going?"                -> live_challenge
+- "What settings is it using?"                 -> live_settings
+Pass fresh=True only when the user needs data newer than a minute.
+
+The tools below read the LAPTOP's copies (stale since the bot moved to the VPS on 2026-10-08) -- use them
+for reports and history, not for the live state.
 Bots: "btc" = BTCUSD.vx H1 momentum (execution/live.py); "multi" = same rule on the symbols that
 passed the 55-symbol scan (execution/live_multi.py).
 
-Which tool when:
+Which tool when (laptop copies):
 - "Is everything OK?"                      -> health  (call first)
 - "How is the btc / multi bot doing?"      -> bot_status, then live_vs_backtest
 - "What trades happened?"                  -> recent_trades (default 20; keep it small)
 - "Why didn't it trade?"                   -> bot_status (last entry decisions), then recent_log
 - "Is news blocking trading?"              -> upcoming_news
 - "What are the rules / what passed?"      -> read_report (rules, multi_symbol_scan, portfolio_sim ...)
-To stop trading the user must use Telegram /kill or create state/KILL_SWITCH themselves.""",
+To stop trading the user must press Pause / Emergency stop on the dashboard website themselves.""",
 )
+from mcp_server import vps  # noqa: E402  (after ROOT is on sys.path)
+
+_ROLES = {"execution.live_multi": "trader", "tools.watchdog": "watchdog", "dashboard.publisher": "publisher"}
 
 
 def _json(path: Path):
@@ -157,6 +171,99 @@ def read_report(name: str = "rules") -> dict:
     if not p.exists():
         return {"error": "report not generated yet"}
     return {"name": name, "content": p.read_text(encoding="utf-8", errors="replace")[:20_000]}
+
+
+# -- live bot on the VPS ------------------------------------------------------------------------------------
+def _running(snap: dict) -> dict:
+    """Which parts are up: trader / watchdog / publisher / MT5 -> start time (UTC) or None."""
+    up = {"trader": None, "watchdog": None, "publisher": None, "mt5": None}
+    procs = snap.get("processes")
+    for p in procs if isinstance(procs, list) else []:
+        role = "mt5" if p["name"].lower() == "terminal64.exe" else next(
+            (r for m, r in _ROLES.items() if m in p["cmd"]), None)
+        if role:
+            up[role] = up[role] or p["started_utc"]
+    return up
+
+
+@server.tool()
+def live_health(fresh: bool = False) -> dict:
+    """Live bot on the VPS in one call: running parts, LIVE / DRY_RUN, kill switch, equity, open trades,
+    challenge headroom, status age (stale > 5 min = trader not updating)."""
+    s = vps.snapshot(force=fresh)
+    if "error" in s:
+        return s
+    st, ch = s.get("status") or {}, s.get("challenge") or {}
+    try:                                                  # age at the moment the snapshot was taken
+        age = round((datetime.fromisoformat(s["now_utc"]) - datetime.fromisoformat(st["generated_utc"]))
+                    .total_seconds() / 60, 1)
+    except Exception:
+        age = None
+    return {"checked_utc": s["now_utc"], "vps_boot_utc": s.get("vps_boot_utc"), "running": _running(s),
+            "mode": st.get("mode"), "live_trading_setting": (s.get("settings") or {}).get("MULTI_LIVE_TRADING"),
+            "kill_switch": bool(st.get("kill_switch_active")) or s.get("kill_switch_file") is not None,
+            "send_block_reason": st.get("send_block_reason"), "status_age_min": age,
+            "stale": (age if age is not None else 1e9) > 5, "equity": st.get("equity"), "balance": st.get("balance"),
+            "open_positions": st.get("open_positions"), "closed_trades": st.get("closed_trades"),
+            "net_pl_usd": st.get("net_pl_usd"), "last_entry_decisions": st.get("entries"),
+            "challenge": {k: ch.get(k) for k in ("rules", "phase", "result", "profit_pct", "target_usd", "trading_days",
+                                                 "daily_headroom_usd", "total_headroom_usd")},
+            "recent_problem_lines": (s.get("problem_lines") or [])[-5:]}
+
+
+@server.tool()
+def live_decisions(hours: int = 12, fresh: bool = False) -> dict:
+    """What the live trader decided per symbol for each H1 bar in the last `hours` (max 72): hold = no signal,
+    blocked = signal stopped by a filter (strong-signal / EMA200 / calm / news / guard), else the order taken."""
+    s = vps.snapshot(force=fresh)
+    if "error" in s:
+        return s
+    from datetime import timedelta
+    cut = (datetime.fromisoformat(s["now_utc"]) - timedelta(hours=max(1, min(int(hours), 72)))).isoformat()
+    bars: dict = {}
+    for key, v in sorted((s.get("decisions") or {}).items(), key=lambda kv: kv[0].split("|", 1)[-1]):
+        sym, _, bar = key.partition("|")
+        if bar >= cut:
+            bars.setdefault(bar, {})[sym] = v
+    return {"bars": bars, "now": (s.get("status") or {}).get("entries")}
+
+
+@server.tool()
+def live_trades(n: int = 20, fresh: bool = False) -> dict:
+    """Last n trades (open and closed) of the live trader on the VPS, newest first (max 200)."""
+    s = vps.snapshot(force=fresh)
+    if "error" in s:
+        return s
+    t = s.get("trades")
+    return t if isinstance(t, dict) else {"trades": t[:max(1, min(int(n), 200))], "total_returned_max": 200}
+
+
+@server.tool()
+def live_challenge(fresh: bool = False) -> dict:
+    """The prop-challenge tracker on the VPS (FundedNext rules): phase, profit, trading days, loss headroom."""
+    s = vps.snapshot(force=fresh)
+    return s if "error" in s else (s.get("challenge") or {"error": "no challenge state on the VPS"})
+
+
+@server.tool()
+def live_settings(fresh: bool = False) -> dict:
+    """Trading settings in the VPS .env (MULTI_*, LIVE_*, PROP_*, KILL*, MT5_SERVER; secrets shown as <set>)."""
+    s = vps.snapshot(force=fresh)
+    return s if "error" in s else {"settings": s.get("settings")}
+
+
+@server.tool()
+def live_log(kind: str = "problems", lines: int = 40, fresh: bool = False) -> dict:
+    """Live trader logs on the VPS. kind: "problems" (ERROR / Traceback / FAILED lines), "status" (the trader's
+    30-second status lines, UTC), "tail" (last lines of the trader log; its own timestamps are VPS local time,
+    UTC-7), "watchdog" (watchdog log tail). Max 400 lines."""
+    s = vps.snapshot(force=fresh)
+    if "error" in s:
+        return s
+    key = {"problems": "problem_lines", "status": "status_lines", "tail": "log_tail", "watchdog": "watchdog_tail"}.get(kind)
+    if not key:
+        return {"error": "kind must be problems, status, tail or watchdog"}
+    return {"kind": kind, "lines": (s.get(key) or [])[-max(1, min(int(lines), 400)):]}
 
 
 if __name__ == "__main__":

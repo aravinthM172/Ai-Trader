@@ -49,3 +49,6 @@ data/gold/
 data/binance_H1/
 data/binance_funding/
 data/fred/
+
+# VPS WinRM password for the MCP server (mcp_server/vps.py)
+.env.vps
