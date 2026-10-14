@@ -107,14 +107,14 @@ def test_fundednext_preset_is_selected_by_prop_challenge(monkeypatch):
     monkeypatch.setenv("PROP_CHALLENGE", "fundednext_2step")
     r = ct.current_rules()
     assert ct.enabled() and r.name == "FundedNext Stellar 2-Step"
-    assert (r.targets, r.min_days, r.daily_loss, r.max_loss, r.inactivity_days) == ((0.08, 0.05), (5, 5), 0.05, 0.10, 60)
-    assert r.weekend_counts and r.daily_base == "initial" and r.day_reset_utc_hour == 21
+    assert (r.targets, r.min_days, r.daily_loss, r.max_loss, r.inactivity_days) == ((0.08, 0.05), (5, 5), 0.05, 0.10, 30)
+    assert r.weekend_counts and r.count_opens and r.daily_base == "initial" and r.day_reset_utc_hour == 21
     monkeypatch.setenv("PROP_DAY_RESET_UTC_HOUR", "22")                       # their server in winter (UTC+2)
     assert ct.current_rules().day_reset_utc_hour == 22
     monkeypatch.setenv("PROP_CHALLENGE", "fundingpips_2step_standard")
     monkeypatch.delenv("PROP_DAY_RESET_UTC_HOUR")
     r = ct.current_rules()
-    assert (r.name, r.min_days, r.daily_loss, r.inactivity_days, r.weekend_counts) ==         ("FundingPips 2-Step Standard", (3, 3), 0.03, 30, False)
+    assert (r.name, r.min_days, r.daily_loss, r.inactivity_days, r.weekend_counts, r.count_opens) ==         ("FundingPips 2-Step Standard", (3, 3), 0.03, 30, False, False)
     monkeypatch.setenv("PROP_CHALLENGE", "true")                              # the old on / off value
     assert ct.enabled() and ct.current_rules().name == "FundingPips 2-Step Standard"
     monkeypatch.setenv("PROP_CHALLENGE", "")
@@ -148,3 +148,29 @@ def test_weekend_closes_count_only_where_the_firm_counts_them(tmp_path):
     assert ct._traded_days(db, 21) == {"2026-10-12"}
     assert ct._traded_days(db, 21, weekend_counts=True) == {"2026-10-10", "2026-10-12"}
 
+
+def test_fundednext_counts_the_day_a_trade_is_opened(tmp_path):
+    import sqlite3
+    db = tmp_path / "t.sqlite"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE trades (opened_utc TEXT, closed_utc TEXT, status TEXT)")
+    c.executemany("INSERT INTO trades VALUES (?,?,?)", [
+        ("2026-10-12T10:00:00+00:00", "2026-10-14T10:00:00+00:00", "CLOSED"),   # opened Monday, closed Wednesday
+        ("2026-10-12T15:00:00+00:00", "2026-10-12T18:00:00+00:00", "CLOSED"),   # second trade Monday: same day
+        ("2026-10-13T22:00:00+00:00", None, "OPEN"),                            # after the 21:00 roll, still open
+    ])
+    c.commit()
+    c.close()
+    assert ct._traded_days(db, 21, weekend_counts=True, opens=True) == {"2026-10-12", "2026-10-14"}
+    assert ct._last_closed(db, 21, weekend_counts=True, opens=True) == datetime.fromisoformat("2026-10-13T22:00:00+00:00")
+    assert ct._traded_days(db, 21, weekend_counts=True) == {"2026-10-12", "2026-10-14"}     # closes: Mon + Wed
+    assert ct._last_closed(db, 21, weekend_counts=True) == datetime.fromisoformat("2026-10-14T10:00:00+00:00")
+
+
+def test_fundednext_inactivity_is_30_days_of_no_new_trade():
+    fn = ct.FUNDEDNEXT_2STEP
+    st = ct.new_state(15000, T0, fn)
+    ev = ct.update(st, now=T0 + timedelta(days=21), equity=15000, balance=15000, traded_days=set(), rules=fn)
+    assert any("no new trade for 21 days (breach at 30)" in e for e in ev) and st["result"] == "in_progress"
+    ev = ct.update(st, now=T0 + timedelta(days=30, hours=1), equity=15000, balance=15000, traded_days=set(), rules=fn)
+    assert st["result"] == "failed" and any("inactivity" in e for e in ev)

@@ -51,15 +51,18 @@ class ChallengeRules:
     inactivity_days: int = 30           # hard breach: no completed trade within 30 consecutive days
     weekend_counts: bool = False        # does a trade closed at the weekend count as a trading day / activity?
     daily_base: str = "day_ref"         # daily loss as a share of: "day_ref" (day-start value) or "initial" (phase start)
+    count_opens: bool = False           # trading day / activity = the day a trade is OPENED (else: a completed close)
 
 
 FUNDINGPIPS_2STEP_STANDARD = ChallengeRules()
 # FundedNext Stellar 2-Step (rules page, help centre and plans page read 2026-10-13): +8 % / +5 %, trades on 5
 # separate days per phase, daily loss 5 % of the INITIAL balance (closed + floating, swap and commission included,
-# reset 00:00 server time), max loss 10 % static, 60 days without a trade = deactivated.  No weekend exception is
-# stated.  Server clock: UTC+3 in summer (21:00 UTC roll), UTC+2 in winter -> PROP_DAY_RESET_UTC_HOUR=22 then.
+# reset 00:00 server time), max loss 10 % static.  No weekend exception is stated.  Help centre via the FundedNext
+# connector 2026-10-14: a trading day counts "if a trade is opened on that day" (an open trade counts), and a CFD
+# account is deactivated after 30 consecutive days without a trade.
+# Server clock: UTC+3 in summer (21:00 UTC roll), UTC+2 in winter -> PROP_DAY_RESET_UTC_HOUR=22 then.
 FUNDEDNEXT_2STEP = ChallengeRules(name="FundedNext Stellar 2-Step", min_days=(5, 5), daily_loss=0.05,
-                                  inactivity_days=60, weekend_counts=True, daily_base="initial")
+                                  inactivity_days=30, weekend_counts=True, daily_base="initial", count_opens=True)
 PRESETS = {"fundingpips_2step_standard": FUNDINGPIPS_2STEP_STANDARD, "fundednext_2step": FUNDEDNEXT_2STEP}
 
 
@@ -119,13 +122,14 @@ def update(st: dict, *, now: datetime, equity: float, balance: float, traded_day
 
     since = last_closed or datetime.fromisoformat(st["started_utc"])
     st["days_since_last_closed_trade"] = round((now - since).total_seconds() / 86400, 1)
+    what = "new trade" if rules.count_opens else "completed trade"
     if st["days_since_last_closed_trade"] >= rules.inactivity_days:
         st["result"] = "failed"
-        events.append(f"CHALLENGE FAILED (phase {st['phase']}): no completed trade for {rules.inactivity_days} days (inactivity)")
+        events.append(f"CHALLENGE FAILED (phase {st['phase']}): no {what} for {rules.inactivity_days} days (inactivity)")
         return events
     if st["days_since_last_closed_trade"] >= rules.inactivity_days - 10 and st.get("warn_inactive") != st["day"]:
         st["warn_inactive"] = st["day"]
-        events.append(f"challenge warning: no completed trade for {st['days_since_last_closed_trade']:.0f} days "
+        events.append(f"challenge warning: no {what} for {st['days_since_last_closed_trade']:.0f} days "
                       f"(breach at {rules.inactivity_days})")
     if daily >= rules.daily_loss:
         st["result"] = "failed"
@@ -161,29 +165,30 @@ def is_weekend_day(day: str) -> bool:
     return datetime.strptime(day, "%Y-%m-%d").weekday() >= 5
 
 
-def _counted_closes(db: Path, reset_hour: int, weekend_counts: bool = False) -> list[datetime]:
+def _counted_closes(db: Path, reset_hour: int, weekend_counts: bool = False, opens: bool = False) -> list[datetime]:
     """Close times of completed trades that the firm counts.  FundingPips (help centre, 2026-10-10): only a fully
     closed trade is activity, and a crypto trade closed over the weekend is neither a trading day nor activity
     (opened at the weekend and closed on a weekday counts on the day it is closed).  weekend_counts: firms without
-    that exception (FundedNext)."""
+    that exception (FundedNext).  opens: firms that count the day a trade is opened, open or closed (FundedNext)."""
     if not db.exists():
         return []
     c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
     try:
-        rows = c.execute("SELECT closed_utc FROM trades WHERE status='CLOSED' AND closed_utc IS NOT NULL")
+        rows = c.execute("SELECT opened_utc FROM trades WHERE opened_utc IS NOT NULL" if opens else
+                         "SELECT closed_utc FROM trades WHERE status='CLOSED' AND closed_utc IS NOT NULL")
         times = [datetime.fromisoformat(r[0]) for r in rows if r[0]]
     finally:
         c.close()
     return [t for t in times if weekend_counts or not is_weekend_day(trading_day(t, reset_hour))]
 
 
-def _traded_days(db: Path, reset_hour: int, weekend_counts: bool = False) -> set[str]:
-    return {trading_day(t, reset_hour) for t in _counted_closes(db, reset_hour, weekend_counts)}
+def _traded_days(db: Path, reset_hour: int, weekend_counts: bool = False, opens: bool = False) -> set[str]:
+    return {trading_day(t, reset_hour) for t in _counted_closes(db, reset_hour, weekend_counts, opens)}
 
 
 def _last_closed(db: Path, reset_hour: int = FUNDINGPIPS_2STEP_STANDARD.day_reset_utc_hour,
-                 weekend_counts: bool = False) -> datetime | None:
-    return max(_counted_closes(db, reset_hour, weekend_counts), default=None)
+                 weekend_counts: bool = False, opens: bool = False) -> datetime | None:
+    return max(_counted_closes(db, reset_hour, weekend_counts, opens), default=None)
 
 
 def enabled() -> bool:
@@ -207,8 +212,9 @@ def run_from_files(*, state_path: Path = STATE, status_path: Path = STATUS, db: 
     except Exception:
         st = new_state(balance, now, rules)
     ev = update(st, now=now, equity=equity, balance=balance,
-                traded_days=_traded_days(db, rules.day_reset_utc_hour, rules.weekend_counts), rules=rules,
-                last_closed=_last_closed(db, rules.day_reset_utc_hour, rules.weekend_counts))
+                traded_days=_traded_days(db, rules.day_reset_utc_hour, rules.weekend_counts, rules.count_opens),
+                rules=rules, last_closed=_last_closed(db, rules.day_reset_utc_hour, rules.weekend_counts,
+                                                      rules.count_opens))
     state_path.parent.mkdir(exist_ok=True)
     state_path.write_text(json.dumps(st, indent=2), encoding="utf-8")
     out.write_text(json.dumps(st, indent=2), encoding="utf-8")
