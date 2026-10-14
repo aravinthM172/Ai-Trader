@@ -13,6 +13,7 @@ Every pass (default 60 s):
   * drawdown        balance in the last 25 % of the way to the drawdown floor -> alert
   * trades/events   new opens, closes, failed orders, SL repairs (state/btc_live_H1.sqlite)
   * edge monitor    hourly (tools/edge_monitor.py, enforced -> may write KILL_SWITCH)
+  * loss review     multi trader, once a UTC day (tools/loss_review.py, report only) -> new findings alerted
   * heartbeat       daily summary at HEARTBEAT_UTC_HOUR
   * Telegram cmds   /status, /kill, /help -- from TELEGRAM_CHAT_ID only.  There is
                     deliberately no /resume: restarting after a kill is a manual step.
@@ -40,7 +41,7 @@ from dotenv import load_dotenv
 
 from common import notify
 from common.logging_setup import get_logger
-from tools import challenge_tracker, edge_monitor
+from tools import challenge_tracker, edge_monitor, loss_review
 
 load_dotenv()
 log = get_logger("watchdog", filename="watchdog.log")
@@ -300,7 +301,8 @@ def launch_multi() -> None:
 
 
 def check_multi(now: datetime, ws: dict, *, procs, status_path=MULTI_STATUS, db=MULTI_DB, ref=MULTI_REF,
-                kill=KILL, restart=launch_multi, run_edge=edge_monitor.run, allow_actions: bool = True) -> list[str]:
+                kill=KILL, restart=launch_multi, run_edge=edge_monitor.run, run_review=loss_review.run,
+                allow_actions: bool = True) -> list[str]:
     """Same checks for the multi-symbol trader (execution/live_multi.py); state kept in ws['multi']."""
     m = ws.setdefault("multi", {})
     alerts: list[str] = []
@@ -376,6 +378,17 @@ def check_multi(now: datetime, ws: dict, *, procs, status_path=MULTI_STATUS, db=
                 alerts.append("[multi] EDGE MONITOR RETIRED THE STRATEGY: " + "; ".join(r.get("trips", [])))
         except Exception as e:
             log.exception("multi edge monitor failed: %s", e)
+
+    day = now.strftime("%Y-%m-%d")                     # loss review: report only, alert each finding once
+    if db.exists() and m.get("review_day") != day:
+        m["review_day"] = day
+        try:
+            found = [f for f in run_review(db=db)["findings"] if not f.startswith("nothing to act on")]
+            sent = set(m.get("review_sent", []))
+            alerts += [f"[multi] LOSS REVIEW: {f}" for f in found if f not in sent]
+            m["review_sent"] = found
+        except Exception as e:
+            log.exception("multi loss review failed: %s", e)
     m["active"] = sorted(active)
     return alerts
 

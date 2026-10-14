@@ -17,6 +17,8 @@ Live against backtest, per market: the live average R against the backtest of th
 
     python -m tools.loss_review              # print + write reports/loss_review.json
 
+The watchdog runs it once a UTC day (tools/watchdog.py) and sends any new finding to Telegram.
+
 Read-only: opens the trade DB read-only and never touches MT5.
 """
 from __future__ import annotations
@@ -165,14 +167,18 @@ def render(rep: dict) -> str:
     return "\n".join(out)
 
 
+def run(db: Path = DB, out: Path = OUT) -> dict:
+    rep = review(db)
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(json.dumps(rep, indent=2), encoding="utf-8")
+    return rep
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--db", type=Path, default=DB)
     a = ap.parse_args()
-    rep = review(a.db)
-    OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(json.dumps(rep, indent=2), encoding="utf-8")
-    print(render(rep))
+    print(render(run(a.db)))
 
 
 if __name__ == "__main__":

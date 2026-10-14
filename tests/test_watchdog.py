@@ -169,3 +169,29 @@ def test_startup_line_reports_the_multi_trader_when_it_is_the_active_bot(tmp_pat
     assert line.startswith("[multi] LIVE | equity $4985.11") and "open 2 | closed 14" in line
     monkeypatch.setattr(wd, "multi_enabled", lambda: False)      # BTC-only set-up keeps the old line
     assert "[multi]" not in wd.startup_line()
+
+
+def test_multi_loss_review_runs_daily_and_alerts_each_finding_once(tmp_path):
+    st = tmp_path / "m.json"
+    st.write_text(json.dumps({"generated_utc": NOW.isoformat()}))
+    c = sqlite3.connect(tmp_path / "m.sqlite")
+    c.execute("CREATE TABLE trades(ticket INTEGER PRIMARY KEY, symbol TEXT, direction TEXT, volume REAL, entry REAL, "
+              "sl REAL, tp REAL, risk_usd REAL)")
+    c.execute("CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts_utc TEXT, kind TEXT, payload TEXT)")
+    c.commit(); c.close()
+    findings, runs = ["1 trade(s) closed by hand"], []
+
+    def review(db):
+        runs.append(db)
+        return {"findings": list(findings)}
+
+    kw = dict(procs=[MT5], status_path=st, db=tmp_path / "m.sqlite", ref=tmp_path / "none.csv",
+              kill=tmp_path / "KILL", restart=lambda: None, run_edge=lambda **k: {"enforced": False},
+              run_review=review)
+    ws = {}
+    assert any("LOSS REVIEW: 1 trade(s) closed by hand" in a for a in wd.check_multi(NOW, ws, **kw))
+    assert not any("LOSS REVIEW" in a for a in wd.check_multi(NOW, ws, **kw)) and len(runs) == 1   # once a day
+    findings.append("XAUUSD: BELOW the backtest range -- look at this market")
+    alerts = wd.check_multi(NOW + timedelta(days=1), ws, **kw)
+    assert [a for a in alerts if "LOSS REVIEW" in a] == ["[multi] LOSS REVIEW: XAUUSD: BELOW the backtest range -- "
+                                                         "look at this market"]
