@@ -338,6 +338,8 @@ def _sync_closed(gw, c, magics: set[int]) -> None:
         if int(d.entry) not in (1, 3):
             continue
         row = c.execute("SELECT status, risk_usd FROM trades WHERE ticket=?", (int(d.position_id),)).fetchone()
+        if not row and _adopt_closed(gw, c, int(d.position_id), magics):
+            row = c.execute("SELECT status, risk_usd FROM trades WHERE ticket=?", (int(d.position_id),)).fetchone()
         if not row or row[0] != "OPEN":
             continue
         pnl = float(d.profit) + float(d.commission) + float(d.swap) + float(getattr(d, "fee", 0.0))
@@ -350,6 +352,90 @@ def _sync_closed(gw, c, magics: set[int]) -> None:
         _event(c, "closed", {"ticket": int(d.position_id), "symbol": d.symbol, "reason": reason, "pnl": round(pnl, 2)})
         log.info("TRADE CLOSED #%d %s %s pnl $%.2f", d.position_id, d.symbol, reason, pnl)
     c.commit()
+
+
+POSITION_WAIT_S = 10.0
+
+
+def _find_position(gw, symbol, magic, order=0, wait_s=None, step_s=0.5):
+    """The bot's position on `symbol` just after a fill.  It can take a moment to appear in the terminal
+    (FundedNext 2026-10-14: none of the 4 fills was there straight away, so no trade was recorded), so poll for
+    up to `wait_s` seconds.  The position whose ticket is the order's ticket wins, else the newest."""
+    deadline = time.monotonic() + (POSITION_WAIT_S if wait_s is None else wait_s)
+    while True:
+        mine = [p for p in gw.positions(symbol) if p["magic"] == magic]
+        if mine:
+            return next((p for p in mine if order and p["ticket"] == order), max(mine, key=lambda p: p["time"]))
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(step_s)
+
+
+def _record_adopted(gw, c, ticket, symbol, group, direction, volume, entry, sl, tp, opened) -> None:
+    """Write a bot trade that is missing from the trade DB (filled, but not found right after the send).  Entry,
+    stop, target and volume come from MT5; ATR = stop distance / 2 (the stop is 2 ATR); risk = the loss at the
+    stop from MT5's own profit calculator (None when there is no stop or MT5 cannot say)."""
+    mt5 = gw.raw()
+    risk = None
+    if sl and sl > 0:
+        try:
+            kind = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+            v = mt5.order_calc_profit(kind, symbol, float(volume), float(entry), float(sl))
+            risk = abs(float(v)) if v is not None else None
+        except Exception:                                                        # noqa: BLE001
+            risk = None
+    atr = abs(entry - sl) / 2.0 if sl and sl > 0 else None
+    c.execute("""INSERT OR IGNORE INTO trades(ticket, symbol, grp, opened_utc, signal_bar_utc, direction, volume,
+                 entry, sl, tp, atr, risk_usd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (int(ticket), symbol, group, opened.isoformat(), None, direction, float(volume), float(entry),
+               float(sl) if sl else None, float(tp) if tp else None, atr, None if risk is None else round(risk, 2)))
+    c.commit()
+    _event(c, "adopted", {"ticket": int(ticket), "symbol": symbol, "direction": direction, "entry": float(entry)})
+    log.warning("ADOPTED #%s %s %s %.2f @ %.5g SL %.5g TP %.5g risk $%s (was missing from the trade DB)", ticket,
+                symbol, direction, float(volume), float(entry), float(sl or 0), float(tp or 0),
+                "?" if risk is None else f"{risk:.2f}")
+
+
+def _adopt_open(gw, c, mine, groups) -> int:
+    """Record the bot's open positions (magic matched) that have no row in the trade DB."""
+    known = {r[0] for r in c.execute("SELECT ticket FROM trades")}
+    n = 0
+    for p in mine:
+        if p["ticket"] not in known:
+            _record_adopted(gw, c, p["ticket"], p["symbol"], groups.get(p["symbol"], ""), p["type"], p["volume"],
+                            p["price_open"], p["sl"], p["tp"], gw.to_utc(p["time"]))
+            n += 1
+    return n
+
+
+_NOT_MINE: set = set()          # closed positions already checked and not opened by the bot
+
+
+def _adopt_closed(gw, c, position_id: int, magics: set[int]) -> bool:
+    """A closing deal for a position missing from the trade DB: record it first when the bot opened it (its
+    opening deal carries one of the bot's magics), so the close below is counted.  Hand trades are skipped."""
+    if position_id in _NOT_MINE:
+        return False
+    mt5 = gw.raw()
+    try:
+        deals = list(mt5.history_deals_get(position=position_id) or [])
+    except Exception:                                                            # noqa: BLE001
+        deals = []
+    opening = next((x for x in deals if int(x.entry) == 0), None)
+    if opening is None or int(opening.magic) not in magics:
+        _NOT_MINE.add(position_id)
+        return False
+    sl = tp = 0.0
+    try:
+        for o in mt5.history_orders_get(position=position_id) or []:
+            if float(getattr(o, "sl", 0) or 0) > 0:
+                sl, tp = float(o.sl), float(getattr(o, "tp", 0) or 0)
+                break
+    except Exception:                                                            # noqa: BLE001
+        pass
+    _record_adopted(gw, c, position_id, opening.symbol, "", "BUY" if int(opening.type) == 0 else "SELL",
+                    float(opening.volume), float(opening.price), sl, tp, gw.to_utc(int(opening.time)))
+    return True
 
 
 def _send(gw, spec, direction, volume, sl_d, tp_d, magic, c) -> dict:
@@ -372,10 +458,9 @@ def _send(gw, spec, direction, volume, sl_d, tp_d, magic, c) -> dict:
             break
     if rc not in _DONE:
         return {"ok": False, "retcode": rc}
-    mine = [p for p in gw.positions(spec.symbol) if p["magic"] == magic]
-    if not mine:
+    pos = _find_position(gw, spec.symbol, magic, int(getattr(r, "order", 0) or 0))
+    if pos is None:
         return {"ok": True, "warning": "filled but position not found"}
-    pos = mine[0]
     if not _ensure_sl(gw, spec, pos, sl, tp, c):
         _close(gw, spec, pos, "no_sl", c)
         return {"ok": False, "error": "SL could not be set -- closed"}
@@ -447,6 +532,7 @@ def run_once(*, now: datetime | None = None) -> dict:
             groups[s] = (info.path or "").split("\\")[0] if info else ""
             specs[s] = gw.get_spec(s)
         mine = [p for p in gw.positions() if p["magic"] in magics]
+        _adopt_open(gw, c, mine, groups)
 
         # manage: time exit + missing-SL repair
         for p in mine:
