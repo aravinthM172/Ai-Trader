@@ -37,5 +37,24 @@ from support that this counts the same is still worth having -> message below. S
 > that this is allowed on this account in the challenge and the funded stage, and tell me if any setting must
 > change? Thank you.
 
-## Reply
-(paste FundedNext's answer here with date, agent name and ticket / chat id)
+## Reply (FundedNext live chat, 2026-10-14, pasted by the user)
+Short form of the question was sent (own Python bot via MT5 Python API, own VPS, one account, 1-hour trades with
+SL/TP, no HFT / copy trading). Support answered with their VPS policy and then:
+
+> "As long as you are abiding by the rules of VPS usage, there should be no issue."
+
+Their VPS policy as quoted in the chat (summary): a private VPS with a dedicated IP; VPS only together with a
+trade-taking EA (no other purpose); usage fee $10 for $5K-$25K accounts; reviewed / possibly terminated for
+restricted IPs, shared or broker-sponsored VPS, manual trading via the VPS, or hiding location / identity.
+TODO: ask support to email the chat transcript, or save a screenshot with the date, and keep it here.
+
+## Compliance check (2026-10-14)
+| Their rule | This setup | OK |
+|---|---|---|
+| Private VPS, dedicated IP | Ezerhost Windows VPS, own IP 160.250.204.196 | yes |
+| Not in a restricted country; MT5 never from a USA IP | IP is in India (Yotta Network Services, Delhi / Gurugram; ipinfo + ip-api). The Windows clock is set to Pacific time, but that is only a display setting | yes |
+| VPS add-on / $10 fee (accounts $5K-$25K) | `Addons (VPS) = 1` on login 14329885 | yes |
+| VPS only with a trade-taking EA | The bot is the only thing trading on it | yes |
+| **No manual trading via the VPS** | Never place, close or edit a trade by hand in the VPS MT5. Watch from the phone app / investor password if needed | **rule to keep** |
+| No shared / broker-sponsored VPS, no hiding location | Own VPS, no VPN on it | yes |
+| Account below $50K | $15K | yes |
