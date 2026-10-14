@@ -504,7 +504,10 @@ def run_once(*, now: datetime | None = None) -> dict:
                     risk=min(symbol_risk(s), prop.risk_cap) if prop is not None else symbol_risk(s), cap_used=cap_used)
                 if res.get("final"):
                     evaluated[key] = res.get("decision", "done")
-        ls["evaluated"] = dict(sorted(evaluated.items())[-2000:])
+                    if res.get("reason"):
+                        ls.setdefault("why", {})[key] = why_text(res)
+        ls["evaluated"] = newest(evaluated, 2000)
+        ls["why"] = newest(ls.get("why") or {}, 500)
         _save_ls(ls)
         summ = c.execute("SELECT COUNT(*), COALESCE(SUM(pnl_usd),0), AVG(r_multiple) FROM trades WHERE status='CLOSED'").fetchone()
         status.update(closed_trades=summ[0], net_pl_usd=round(summ[1], 2),
@@ -529,7 +532,7 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
     sig = btc_h1_signal.generate(s, done)
     if sig.decision == "HOLD":
         return {"decision": "hold", "final": True}
-    out = {"decision": sig.decision, "signal_bar_utc": sig.signal_bar_utc}
+    out = {"decision": sig.decision, "side": sig.decision, "signal_bar_utc": sig.signal_bar_utc}
     if sig.decision == "SELL" and s in LONG_ONLY_SYMBOLS:
         return {**out, "decision": "blocked", "reason": "buy-only symbol", "final": True}
     if s in STRONG_ONLY_SYMBOLS:
@@ -673,6 +676,24 @@ def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok, close_
     return d
 
 
+def newest(d: dict, n: int) -> dict:
+    """The n newest "SYMBOL|bar time" entries.  By bar time, not by key: sorting the keys sorts by symbol, and the
+    cap then dropped BTCUSD's newest bars first (the next pass evaluated such a bar again)."""
+    return dict(sorted(d.items(), key=lambda kv: (kv[0].split("|", 1)[-1], kv[0]))[-n:])
+
+
+def why_text(res: dict) -> str:
+    """'BUY regime: daily close 4136 below EMA200 4307' -- the signal's side and why it was not traded."""
+    return f"{res.get('side', '')} {res.get('reason', '')}".strip()[:200]
+
+
+def _entry_text(v) -> str:
+    if not isinstance(v, dict):
+        return v
+    d = v.get("decision")
+    return f"{d}: {why_text(v)}" if d in ("blocked", "skip") and v.get("reason") else d
+
+
 def _write_status(st: dict) -> None:
     REPORTS.mkdir(exist_ok=True)
     (REPORTS / "multi_live_status.json").write_text(json.dumps(st, indent=2, default=str), encoding="utf-8")
@@ -689,7 +710,7 @@ def main() -> int:
             st = run_once()
             print(f"[{st['generated_utc'][:19]}] {st.get('mode')} eq ${st.get('equity')} open {len(st.get('open_positions') or [])} "
                   f"closed {st.get('closed_trades')} net ${st.get('net_pl_usd')} | " +
-                  json.dumps({k: v.get('decision') if isinstance(v, dict) else v for k, v in st.get('entries', {}).items()})[:400])
+                  json.dumps({k: _entry_text(v) for k, v in st.get('entries', {}).items()})[:900])
         except KeyboardInterrupt:
             return 0
         except Exception as e:
