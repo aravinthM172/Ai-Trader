@@ -43,6 +43,7 @@ o["kill_switch_file"] = k.read_text(encoding="utf-8", errors="replace")[:300] if
 st = rj(R / "state" / "multi_live_state.json") or {}
 cut = (now - timedelta(hours=72)).isoformat()
 o["decisions"] = {key: v for key, v in (st.get("evaluated") or {}).items() if key.split("|", 1)[-1] >= cut}
+o["why"] = {key: v for key, v in (st.get("why") or {}).items() if key.split("|", 1)[-1] >= cut}
 
 env = {}
 try:

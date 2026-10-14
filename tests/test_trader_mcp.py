@@ -31,6 +31,7 @@ SNAP = {
     "kill_switch_file": None,
     "decisions": {"BTCUSD|2026-10-13T20:00:00+00:00": "hold", "XAUUSD|2026-10-14T00:00:00+00:00": "blocked",
                   "BTCUSD|2026-10-14T04:00:00+00:00": "hold"},
+    "why": {"XAUUSD|2026-10-14T00:00:00+00:00": "BUY regime: daily close 4136 below EMA200 4307"},
     "settings": {"MULTI_LIVE_TRADING": "true", "MT5_PASSWORD": "<set>"},
     "status_lines": ["[a]", "[b]"], "problem_lines": ["x ERROR y"], "log_tail": ["t"], "watchdog_tail": ["w"],
     "trades": [{"ticket": i} for i in range(5)],
@@ -48,7 +49,8 @@ def test_live_tools_read_the_vps_snapshot(monkeypatch):
     assert h["challenge"]["rules"] == "FundedNext Stellar 2-Step"
     d = tm.live_decisions(hours=6)                                 # 23:30 cut: drops the 20:00 bar
     assert list(d["bars"]) == ["2026-10-14T00:00:00+00:00", "2026-10-14T04:00:00+00:00"]
-    assert d["bars"]["2026-10-14T00:00:00+00:00"] == {"XAUUSD": "blocked"}
+    assert d["bars"]["2026-10-14T00:00:00+00:00"] == {"XAUUSD": "blocked: BUY regime: daily close 4136 below EMA200 4307"}
+    assert d["bars"]["2026-10-14T04:00:00+00:00"] == {"BTCUSD": "hold"}
     assert [t["ticket"] for t in tm.live_trades(n=2)["trades"]] == [0, 1]
     assert tm.live_settings()["settings"]["MT5_PASSWORD"] == "<set>"
     assert tm.live_log("problems")["lines"] == ["x ERROR y"] and "error" in tm.live_log("nope")

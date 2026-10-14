@@ -214,17 +214,20 @@ def live_health(fresh: bool = False) -> dict:
 @server.tool()
 def live_decisions(hours: int = 12, fresh: bool = False) -> dict:
     """What the live trader decided per symbol for each H1 bar in the last `hours` (max 72): hold = no signal,
-    blocked = signal stopped by a filter (strong-signal / EMA200 / calm / news / guard), else the order taken."""
+    blocked = signal stopped by a filter (strong-signal / EMA200 / calm / news / guard), else the order taken.
+    A blocked / skipped bar shows the signal's side and the reason ("blocked: BUY regime: daily close ... below
+    EMA200 ...") once the trader records reasons (bars before that show the bare word)."""
     s = vps.snapshot(force=fresh)
     if "error" in s:
         return s
     from datetime import timedelta
     cut = (datetime.fromisoformat(s["now_utc"]) - timedelta(hours=max(1, min(int(hours), 72)))).isoformat()
+    why = s.get("why") or {}
     bars: dict = {}
     for key, v in sorted((s.get("decisions") or {}).items(), key=lambda kv: kv[0].split("|", 1)[-1]):
         sym, _, bar = key.partition("|")
         if bar >= cut:
-            bars.setdefault(bar, {})[sym] = v
+            bars.setdefault(bar, {})[sym] = f"{v}: {why[key]}" if key in why else v
     return {"bars": bars, "now": (s.get("status") or {}).get("entries")}
 
 
