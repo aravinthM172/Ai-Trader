@@ -12,6 +12,8 @@ Limit: selection is post-hoc -- a skipped trade does not free the slot for a lat
 
     python -m backtest.ml_filter_study            # validate, write ML_FILTER_STUDY.md
     python -m backtest.ml_filter_study --freeze   # also fit on all signals and write strategy/ml_filter_model.json
+    python -m backtest.ml_filter_study --challenger 2027-01   # fit on all signals -> strategy/ml_challengers/2027-01.json
+                                                  # (scored in shadow by execution/paper_ml_filter.py; never live)
 """
 from __future__ import annotations
 
@@ -112,6 +114,7 @@ def _md(rows: list[dict]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--freeze", action="store_true", help="fit on all signals and write strategy/ml_filter_model.json")
+    ap.add_argument("--challenger", metavar="NAME", help="fit on all signals and write strategy/ml_challengers/NAME.json")
     a = ap.parse_args()
     rng = np.random.default_rng(7)
     T = dataset()
@@ -147,6 +150,17 @@ def main() -> int:
         final["trained_to"], final["signals"] = str(T.entry.max().date()), len(T)
         mf.MODEL_PATH.write_text(json.dumps(final, indent=1), encoding="utf-8")
         print(f"model written: {mf.MODEL_PATH}")
+    if a.challenger:
+        cur = mf.load_model()
+        if cur and str(T.entry.max().date()) <= cur.get("trained_to", ""):
+            print(f"no newer signals than the current model ({cur['trained_to']}): refresh the data first -- "
+                  "challenger not written")
+            return 1
+        final["trained_to"], final["signals"] = str(T.entry.max().date()), len(T)
+        out_p = mf.MODEL_PATH.parent / "ml_challengers" / f"{a.challenger}.json"
+        out_p.parent.mkdir(exist_ok=True)
+        out_p.write_text(json.dumps(final, indent=1), encoding="utf-8")
+        print(f"challenger written: {out_p} -- upload it to the VPS; it is scored in shadow from the next pass")
     return 0
 
 

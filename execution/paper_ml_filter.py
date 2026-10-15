@@ -11,6 +11,11 @@ VERDICT RULE (fixed 2026-10-10, before any live trade was scored): the filter ma
 when >= MIN_CLOSED closed trades are scored, with >= MIN_PER_GROUP in each group, AND the taken group's average R
 is above the skipped group's.  Until then the answer is "keep watching".
 
+CHALLENGERS: every model file in strategy/ml_challengers/ (a retrained candidate, backtest/ml_filter_study.py
+--challenger) scores the same live trades from the same stored features, in shadow, and is judged by the same rule.
+A challenger replaces the model above only by hand, and only when its verdict is "helps" and its taken group beats
+the current model's taken group on the same trades.
+
 Runs inside the hourly paper pass (execution/paper_ideas.py) or alone:
     python -m execution.paper_ml_filter            one pass
     python -m execution.paper_ml_filter --report   print the current standing
@@ -35,6 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIVE_DB = ROOT / "state" / "multi_live.sqlite"
 DB = ROOT / "state" / "paper_ml_filter.sqlite"
 STATUS = ROOT / "reports" / "paper_ml_filter_status.json"
+CHALLENGERS = ROOT / "strategy" / "ml_challengers"
 MIN_CLOSED, MIN_PER_GROUP = 60, 20
 
 
@@ -44,11 +50,35 @@ def _open(db: Path) -> sqlite3.Connection:
     c.execute("""CREATE TABLE IF NOT EXISTS scores(
         ticket INTEGER PRIMARY KEY, symbol TEXT, signal_bar_utc TEXT, direction TEXT, score REAL, taken INTEGER,
         features TEXT, note TEXT, scored_utc TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS challenger_scores(
+        model TEXT, ticket INTEGER, score REAL, taken INTEGER, PRIMARY KEY(model, ticket))""")
     return c
 
 
+def signal_bar(signal_bar_utc, opened_utc) -> str | None:
+    """The trade's signal bar; for a trade without one (adopted after a late fill) the H1 bar before its open."""
+    if isinstance(signal_bar_utc, str) and signal_bar_utc:
+        return signal_bar_utc
+    if isinstance(opened_utc, str) and opened_utc:
+        t = pd.Timestamp(opened_utc)
+        t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
+        return (t.floor("h") - pd.Timedelta(hours=1)).isoformat()
+    return None
+
+
+def challengers(folder: Path = CHALLENGERS) -> dict:
+    out = {}
+    for f in sorted(folder.glob("*.json")) if folder.exists() else []:
+        m = mf.load_model(f)
+        if m is None:
+            log.warning("challenger %s is not a usable model -- ignored", f.name)
+        else:
+            out[f.stem] = m
+    return out
+
+
 def live_trades(db: Path) -> pd.DataFrame:
-    cols = ["ticket", "symbol", "signal_bar_utc", "direction", "status", "r_multiple", "closed_utc"]
+    cols = ["ticket", "symbol", "opened_utc", "signal_bar_utc", "direction", "status", "r_multiple", "closed_utc"]
     if not db.exists():
         return pd.DataFrame(columns=cols)
     c = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
@@ -88,35 +118,48 @@ def score_trade(gw, model: dict, symbol: str, signal_bar_utc: str, direction: st
 
 
 def run_once(gw, now: datetime | None = None, live_db: Path = LIVE_DB, db: Path = DB, status: Path = STATUS,
-             model: dict | None = None) -> dict:
+             model: dict | None = None, challenger_models: dict | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     model = model or mf.load_model()
     if model is None:
         log.warning("no usable model file (%s) -- nothing scored", mf.MODEL_PATH.name)
         return {"error": "no model"}
     trades = live_trades(live_db)
+    chal = challengers() if challenger_models is None else challenger_models
     c = _open(db)
     try:
         done = {r[0] for r in c.execute("SELECT ticket FROM scores WHERE score IS NOT NULL")}
         for t in trades[~trades.ticket.isin(done)].itertuples():
-            if not t.signal_bar_utc or t.direction not in ("BUY", "SELL"):
+            sig = signal_bar(t.signal_bar_utc, t.opened_utc)
+            if not sig or t.direction not in ("BUY", "SELL"):
                 continue
             try:
-                res, note = score_trade(gw, model, t.symbol, t.signal_bar_utc, t.direction, now)
+                res, note = score_trade(gw, model, t.symbol, sig, t.direction, now)
             except Exception as e:                                  # one bad symbol must not stop the pass
                 res, note = None, f"error: {e}"
                 log.exception("scoring %s #%s failed", t.symbol, t.ticket)
             c.execute("INSERT OR REPLACE INTO scores VALUES(?,?,?,?,?,?,?,?,?)",
-                      (int(t.ticket), t.symbol, t.signal_bar_utc, t.direction, res and res["score"],
+                      (int(t.ticket), t.symbol, sig, t.direction, res and res["score"],
                        res and int(res["taken"]), json.dumps(res["features"]) if res else None, note, now.isoformat()))
             if res:
                 log.info("scored %s #%s %s: %+.3f -> %s", t.symbol, t.ticket, t.direction, res["score"],
                          "taken" if res["taken"] else "skipped")
+        for name, cm in chal.items():                     # same stored features, so no extra candles needed
+            have = {r[0] for r in c.execute("SELECT ticket FROM challenger_scores WHERE model=?", (name,))}
+            for tk, fj in c.execute("SELECT ticket, features FROM scores WHERE features IS NOT NULL").fetchall():
+                if tk not in have:
+                    s, taken = mf.score(cm, json.loads(fj))
+                    c.execute("INSERT INTO challenger_scores VALUES(?,?,?,?)", (name, tk, s, int(taken)))
         c.commit()
         scores = pd.read_sql_query("SELECT ticket, score, taken, note FROM scores", c)
+        cs = pd.read_sql_query("SELECT model, ticket, score, taken FROM challenger_scores", c)
     finally:
         c.close()
     out = standing(trades, scores, now, model)
+    out["challengers"] = {}
+    for name, cm in chal.items():
+        st = standing(trades, cs[cs.model == name].drop(columns="model").assign(note="ok"), now, cm)
+        out["challengers"][name] = {k: st[k] for k in ("model_trained_to", "scored", "taken", "skipped", "verdict")}
     status.parent.mkdir(exist_ok=True)
     status.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out
@@ -159,7 +202,10 @@ def report(status: Path = STATUS) -> str:
     line = lambda k: f"{s[k]['closed']} closed, avg R {s[k]['avg_R']}, total R {s[k]['total_R']}"  # noqa: E731
     return "\n".join([f"paper ML filter @ {s['generated_utc'][:16]}  scored {s['scored']} of {s['live_trades']} live trades "
                       f"({s['open_scored']} still open, {s['not_scored']} not scored)",
-                      f"  taken:   {line('taken')}", f"  skipped: {line('skipped')}", f"  verdict: {s['verdict']}"])
+                      f"  taken:   {line('taken')}", f"  skipped: {line('skipped')}", f"  verdict: {s['verdict']}"]
+                     + [f"  challenger {n} (trained to {c['model_trained_to']}): taken {c['taken']['closed']} avg R "
+                        f"{c['taken']['avg_R']}, skipped {c['skipped']['closed']} avg R {c['skipped']['avg_R']} -> "
+                        f"{c['verdict']}" for n, c in s.get("challengers", {}).items()])
 
 
 def main() -> int:

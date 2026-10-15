@@ -101,3 +101,33 @@ def test_verdict_needs_enough_trades_then_compares_the_groups():
     assert "helps" in pm.standing(trades, scores, now, m)["verdict"]
     assert "NOT" in pm.standing(trades, scores.assign(taken=1 - scores.taken), now, m)["verdict"]
     assert pm.standing(trades.head(10), scores.head(10), now, m)["verdict"].startswith("keep watching")
+
+
+def test_adopted_trade_without_signal_bar_uses_the_bar_before_its_open():
+    assert pm.signal_bar(None, "2026-10-14T11:00:22+00:00") == "2026-10-14T10:00:00+00:00"
+    assert pm.signal_bar(float("nan"), "2026-10-14T13:00:24.5") == "2026-10-14T12:00:00+00:00"
+    assert pm.signal_bar("2026-10-14 16:00:00+00:00", "2026-10-14T17:00:27+00:00") == "2026-10-14 16:00:00+00:00"
+    assert pm.signal_bar(None, None) is None
+
+
+def test_challenger_scores_the_same_trades_in_shadow(tmp_path):
+    h1, d1 = _h1(), _d1()
+    live = tmp_path / "multi_live.sqlite"
+    c = sqlite3.connect(live)
+    c.execute("""CREATE TABLE trades(ticket INTEGER PRIMARY KEY, symbol TEXT, opened_utc TEXT, signal_bar_utc TEXT,
+        direction TEXT, status TEXT, r_multiple REAL, closed_utc TEXT)""")
+    c.execute("INSERT INTO trades VALUES(1,'BTCUSD',?,NULL,'BUY','CLOSED',2.0,'x')",       # adopted: no signal bar
+              ((h1.time.iloc[-30] + pd.Timedelta(minutes=1)).isoformat(),))
+    c.execute("INSERT INTO trades VALUES(2,'BTCUSD',NULL,?,'SELL','CLOSED',-1.0,'y')", (h1.time.iloc[-20].isoformat(),))
+    c.commit(); c.close()
+    champ = mf.load_model()
+    always = dict(champ, threshold=-1e9)                          # a challenger that takes everything
+    kw = dict(live_db=live, db=tmp_path / "p.sqlite", status=tmp_path / "s.json", model=champ,
+              challenger_models={"take_all": always})
+    s = pm.run_once(FakeGW(h1, d1), datetime(2026, 10, 9, 13, tzinfo=timezone.utc), **kw)
+    assert s["scored"] == 2
+    ch = s["challengers"]["take_all"]
+    assert ch["scored"] == 2 and ch["taken"]["closed"] == 2 and ch["skipped"]["closed"] == 0
+    assert ch["verdict"].startswith("keep watching") and "challenger take_all" in pm.report(tmp_path / "s.json")
+    pm.run_once(FakeGW(h1, d1), datetime(2026, 10, 9, 14, tzinfo=timezone.utc), **kw)          # scored once only
+    assert sqlite3.connect(tmp_path / "p.sqlite").execute("SELECT COUNT(*) FROM challenger_scores").fetchone()[0] == 2
