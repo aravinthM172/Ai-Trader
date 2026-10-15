@@ -244,36 +244,49 @@ def _r(group, rule, status, value, limit=""):
     return {"group": group, "rule": rule, "status": status, "value": value, "limit": limit}
 
 
+def firm_rules() -> dict:
+    """The prop firm's rules the tracker judges by (PROP_CHALLENGE in .env), for the page's labels and tiles."""
+    from tools.challenge_tracker import current_rules
+    r = current_rules()
+    return {"name": r.name, "targets": list(r.targets), "min_days": list(r.min_days), "daily_loss": r.daily_loss,
+            "max_loss": r.max_loss, "daily_base": r.daily_base, "day_reset_utc_hour": r.day_reset_utc_hour,
+            "inactivity_days": r.inactivity_days, "count_opens": r.count_opens}
+
+
 def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | None, trades: list[dict],
                 processes: dict, kill_switch: str | None, edge: dict | None, news_events: list[dict],
-                now: datetime) -> list[dict]:
-    """Every FundingPips and own rule with status pass / warn / fail / info."""
+                now: datetime, firm: dict | None = None) -> list[dict]:
+    """Every prop-firm and own rule with status pass / warn / fail / info."""
     out: list[dict] = []
+    f = firm or firm_rules()
     eq = float(account.get("equity") or 0.0)
     ch = challenge or {}
-    # ---- FundingPips 2-Step Standard (judged as the firm would) --------------------------
+    # ---- the prop firm's challenge (judged as the firm would) ----------------------------
     if ch:
         res = ch.get("result")
-        out.append(_r("FundingPips", f"Challenge result (phase {ch.get('phase')})",
+        i = 0 if ch.get("phase") == 1 else 1
+        out.append(_r("Firm", f"Challenge result (phase {ch.get('phase')})",
                       "fail" if res == "failed" else "pass" if res == "passed" else "info", res))
         tgt, base = ch.get("target_usd"), ch.get("phase_start_balance")
-        out.append(_r("FundingPips", f"Profit target phase {ch.get('phase')}",
+        out.append(_r("Firm", f"Profit target phase {ch.get('phase')}",
                       "pass" if tgt and eq >= tgt else "info", f"{ch.get('profit_pct')}%",
-                      f"{'+8' if ch.get('phase') == 1 else '+5'}% (${tgt:,.0f})" if tgt else ""))
-        days = len(ch.get("trading_days") or [])
-        out.append(_r("FundingPips", "Minimum trading days", "pass" if days >= 3 else "info", days, "≥ 3"))
-        dl = float(ch.get("daily_loss_pct") or 0)
-        out.append(_r("FundingPips", "Daily loss (day starts 21:00 UTC)", "fail" if dl >= 5 else "warn" if dl >= 3.5 else "pass",
-                      f"{dl:.2f}% (room ${ch.get('daily_headroom_usd')})", "< 5% of higher of opening balance/equity"))
-        tl = 100 * (base - eq) / base if base and eq else 0.0
-        out.append(_r("FundingPips", "Max loss (static from start)", "fail" if tl >= 10 else "warn" if tl >= 7 else "pass",
-                      f"{max(tl, 0):.2f}% (room ${ch.get('total_headroom_usd')})", f"< 10% (never below ${base * 0.9:,.0f})" if base else "< 10%"))
+                      f"+{100 * f['targets'][i]:g}% (${tgt:,.0f})" if tgt else ""))
+        days, need = len(ch.get("trading_days") or []), f["min_days"][i]
+        out.append(_r("Firm", "Minimum trading days" + (" (a day counts when a trade is opened)" if f["count_opens"] else ""),
+                      "pass" if days >= need else "info", days, f"≥ {need}"))
+        dl, dlim = float(ch.get("daily_loss_pct") or 0), 100 * f["daily_loss"]
+        of = "of the starting balance" if f["daily_base"] == "initial" else "of the higher of day-start balance / equity"
+        out.append(_r("Firm", f"Daily loss (day starts {f['day_reset_utc_hour']:02d}:00 UTC)",
+                      "fail" if dl >= dlim else "warn" if dl >= 0.7 * dlim else "pass",
+                      f"{dl:.2f}% (room ${ch.get('daily_headroom_usd')})", f"< {dlim:g}% {of}, open + closed"))
+        tl, mlim = 100 * (base - eq) / base if base and eq else 0.0, 100 * f["max_loss"]
+        out.append(_r("Firm", "Max loss (static from start)", "fail" if tl >= mlim else "warn" if tl >= 0.7 * mlim else "pass",
+                      f"{max(tl, 0):.2f}% (room ${ch.get('total_headroom_usd')})",
+                      f"< {mlim:g}% (never below ${base * (1 - f['max_loss']):,.0f})" if base else f"< {mlim:g}%"))
     else:
-        out.append(_r("FundingPips", "Challenge tracking", "warn", "not started",
+        out.append(_r("Firm", "Challenge tracking", "warn", "not started",
                       "set PROP_CHALLENGE and run tools.challenge_tracker --reset"))
     open_tr = [t for t in trades if t.get("status") == "OPEN"]
-    worst = max(((t.get("risk_usd") or 0) / eq * 100 for t in open_tr), default=0.0) if eq else 0.0
-    out.append(_r("FundingPips", "Risk per trade (funded max 3%)", "fail" if worst > 3 else "pass", f"{worst:.2f}% largest open", "≤ 3%"))
     near_news = []
     for t in trades:
         for key in ("opened_utc", "closed_utc"):
@@ -285,15 +298,15 @@ def rules_check(*, challenge: dict | None, account: dict, multi_status: dict | N
                     near_news.append(f"#{t.get('ticket')} {key[:-4]} near {e['event']}")
     phase = ch.get("phase")
     funded = phase not in (1, 2)
-    out.append(_r("FundingPips", "News window (funded only: ±5 min news / ±10 min speeches; trades opened 5 h+ before are exempt)",
+    out.append(_r("Firm", "News window (funded only: trades within 5 min of high-impact news)",
                   ("warn" if near_news else "pass") if funded else "info",
                   ("; ".join(near_news[:3]) or "none this week") if funded else "no news restriction during evaluation",
-                  "profit deducted, not a breach"))
-    idle = ch.get("days_since_last_closed_trade")
+                  "only 40% of the profit counts, not a breach"))
+    idle, lim = ch.get("days_since_last_closed_trade"), f["inactivity_days"]
+    what = "opened" if f["count_opens"] else "closed"
     if idle is not None:
-        out.append(_r("FundingPips", "Inactivity (a trade must close within 30 days)",
-                      "fail" if idle >= 30 else "warn" if idle >= 20 else "pass", f"{idle:.0f} days since last closed trade", "< 30 days"))
-    out.append(_r("FundingPips", "Weekend / overnight holding", "info", "Swing add-on bought", "required for 14-96 h trades"))
+        out.append(_r("Firm", f"Inactivity (a trade must be {what} within {lim} days)",
+                      "fail" if idle >= lim else "warn" if idle >= lim - 10 else "pass", f"{idle:.0f} days since last trade", f"< {lim} days"))
     # ---- own rules (RULES.md) -----------------------------------------------------------------
     ms = multi_status or {}
     risk = float(ms.get("risk_per_trade") or 0.005) * 100
@@ -458,13 +471,15 @@ def gather() -> dict:
     mkt = market(symbols)
     add_blocks(mkt, (ms or {}).get("open_positions") or [])
     kill = FILES["kill"].read_text(encoding="utf-8").strip()[:200] if FILES["kill"].exists() else None
+    firm = firm_rules()
     try:
         rules = rules_check(challenge=ch, account=mkt.get("account") or {}, multi_status=ms, trades=trades,
-                            processes=procs, kill_switch=kill, edge=edge, news_events=_week_news(), now=now)
+                            processes=procs, kill_switch=kill, edge=edge, news_events=_week_news(), now=now, firm=firm)
     except Exception as e:
         rules = [_r("Own", "Rules panel", "warn", f"error: {e}")]
     return {
         "generated_utc": now.isoformat(),
+        "firm": firm,
         "rules": rules,
         "processes": procs,
         "kill_switch": kill,

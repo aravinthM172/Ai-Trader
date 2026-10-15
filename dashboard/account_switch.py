@@ -31,7 +31,7 @@ ACCOUNT_TYPES = ("demo", "real")
 MODES = {0: "demo", 1: "contest", 2: "real"}       # MT5 account_info().trade_mode
 PER_ACCOUNT = ("multi_live.sqlite", "multi_live_state.json", "challenge_state.json", "watchdog_state.json")
 CHALLENGE = STATE / "challenge_state.json"
-ACCOUNT_SIZES = (5_000, 10_000, 25_000, 50_000, 100_000)     # FundingPips 2-step account sizes
+ACCOUNT_SIZES = (6_000, 15_000, 25_000, 50_000, 100_000, 200_000)   # FundedNext Stellar 2-Step account sizes
 PHASES = ("1", "2")
 # the MT5 balance must be within this band of the chosen size: below 90 % the account has already hit the 10 % max loss,
 # above 115 % the chosen size is almost certainly wrong (a smaller size would loosen every loss limit the bot enforces)
@@ -65,7 +65,7 @@ def validate(cmd: dict) -> tuple[int | None, str, str, str]:
     if not raw.isdigit() or not 3 <= len(raw) <= 15:
         return None, server, password, "login must be the account number (digits only)"
     if not server or len(server) > 100:
-        return None, server, password, "server is required (as shown in MT5, e.g. FundingPips-Trial)"
+        return None, server, password, "server is required (as shown in MT5, e.g. FundedNext-Server 2)"
     if not password or len(password) > 100:
         return None, server, password, "password is required"
     if cmd.get("account_type") not in ACCOUNT_TYPES:

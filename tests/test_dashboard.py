@@ -57,15 +57,20 @@ def test_store_and_state_keep_equity_per_account(tmp_path):
     assert json.loads((tmp_path / "latest.json").read_text())["market"]["account"]["login"] == 2
 
 
+FN = {"name": "FundedNext Stellar 2-Step", "targets": [0.08, 0.05], "min_days": [5, 5], "daily_loss": 0.05, "max_loss": 0.10,
+      "daily_base": "initial", "day_reset_utc_hour": 21, "inactivity_days": 30, "count_opens": True}
+
+
 def _rules(**over):
     base = dict(challenge={"result": "in_progress", "phase": 1, "target_usd": 5400.0, "phase_start_balance": 5000.0,
-                           "profit_pct": 1.0, "trading_days": ["a", "b", "c"], "daily_loss_pct": 0.5,
+                           "profit_pct": 1.0, "trading_days": ["a", "b", "c", "d", "e"], "daily_loss_pct": 0.5,
                            "daily_headroom_usd": 225.0, "total_headroom_usd": 550.0},
                 account={"equity": 5050.0, "type": "demo", "algo_terminal": True, "algo_account": True},
                 multi_status={"risk_per_trade": 0.005, "symbols": ["BTCUSD.vx", "XAUUSD.vx", "DAX40.vx"]},
                 trades=[{"ticket": 1, "status": "OPEN", "risk_usd": 25.0, "grp": "Crypto", "opened_utc": "2026-10-06T10:00:00+00:00"}],
                 processes={"live_multi": True, "watchdog": True, "mt5": True, "btc_live": False},
-                kill_switch=None, edge=None, news_events=[], now=datetime(2026, 10, 6, 12, tzinfo=timezone.utc))
+                kill_switch=None, edge=None, news_events=[], now=datetime(2026, 10, 6, 12, tzinfo=timezone.utc),
+                firm=FN)
     base.update(over)
     return {r["rule"]: r["status"] for r in dd.rules_check(**base)}
 
@@ -73,7 +78,7 @@ def _rules(**over):
 def test_rules_healthy_state_has_no_failures():
     st = _rules()
     assert "fail" not in st.values()
-    assert st["Daily loss (day starts 21:00 UTC)"] == "pass" and st["Minimum trading days"] == "pass" and st["Max open positions"] == "pass"
+    assert st["Daily loss (day starts 21:00 UTC)"] == "pass" and st["Minimum trading days (a day counts when a trade is opened)"] == "pass" and st["Max open positions"] == "pass"
 
 
 def test_rules_flag_breaches():
@@ -91,7 +96,7 @@ def test_rules_news_window_and_position_caps():
               for k in range(7)]
     st = _rules(trades=trades, news_events=[{"time_utc": "2026-10-07T18:00:00+00:00", "event": "FOMC"}])
     assert st["Max open positions"] == "fail" and st["Positions per market group"] == "fail"
-    assert st["News window (funded only: ±5 min news / ±10 min speeches; trades opened 5 h+ before are exempt)"] == "info"   # evaluation phase
+    assert st["News window (funded only: trades within 5 min of high-impact news)"] == "info"   # evaluation phase
 
 
 def test_tick_endpoint_roundtrip(tmp_path, monkeypatch):
@@ -201,8 +206,8 @@ def test_add_blocks_uses_group_cap_from_env(monkeypatch):
 
 def test_switch_account_password_reaches_pc_once_and_never_the_page(monkeypatch):
     srv, url = _server(monkeypatch)
-    body = {"action": "switch_account", "confirm": "SWITCH", "login": "12345678", "server": "FundingPips-Trial",
-            "password": "s3cret!", "close_first": True, "account_type": "demo", "account_size": "10000", "phase": "1"}
+    body = {"action": "switch_account", "confirm": "SWITCH", "login": "12345678", "server": "FundedNext-Server 2",
+            "password": "s3cret!", "close_first": True, "account_type": "demo", "account_size": "15000", "phase": "1"}
     assert _req(url + "/api/command", data={**body, "confirm": "STOP"}, basic=True)[0] == 400
     assert _req(url + "/api/command", data={**body, "login": "12ab"}, basic=True)[0] == 400
     assert _req(url + "/api/command", data={**body, "password": ""}, basic=True)[0] == 400
@@ -220,7 +225,7 @@ def test_unclaimed_switch_password_is_wiped_on_expiry(monkeypatch):
     srv, url = _server(monkeypatch)
     _req(url + "/api/command", data={"action": "switch_account", "confirm": "SWITCH", "login": "123456",
                                      "server": "S", "password": "pw", "account_type": "demo",
-                                     "account_size": "5000", "phase": "1"}, basic=True)
+                                     "account_size": "6000", "phase": "1"}, basic=True)
     ca._CMD["created"] -= ca.CMD_TTL + 1
     assert _req(url + "/api/command/next", bearer=True)[1] == {}
     assert ca._CMD["status"] == "expired" and "password" not in ca._CMD
@@ -272,7 +277,7 @@ class FakeMT5:
         self.logins.append((login, password, server))
         if password and password != self.good:
             return False
-        self.acct = _Acct(login, server, balance=10000.0, trade_mode=self.new_mode if password else 0)
+        self.acct = _Acct(login, server, balance=15000.0, trade_mode=self.new_mode if password else 0)
         return True
 
 
@@ -280,7 +285,7 @@ def _switch(fake, tmp_path, **cmd):
     from dashboard import account_switch as sw
     calls = []
     st, msg = sw.switch_account({"login": "222", "server": "New-Srv", "password": "pw", "account_type": "demo",
-                                 "account_size": "10000", "phase": "1", **cmd},
+                                 "account_size": "15000", "phase": "1", **cmd},
                                 mt5=fake, magics={7}, state=tmp_path, env=tmp_path / ".env", sleep=lambda s: None,
                                 stop=lambda: calls.append("stop"), start=lambda: calls.append("start"))
     return st, msg, calls
@@ -298,7 +303,7 @@ def test_account_switch_logs_in_archives_state_and_stays_paused(tmp_path):
     assert not (tmp_path / "multi_live.sqlite").exists()
     assert "account switch" in (tmp_path / "KILL_SWITCH").read_text()
     saved = json.loads((tmp_path / "account.json").read_text())
-    assert saved == {"login": 222, "server": "New-Srv", "switched_utc": saved["switched_utc"], "account_size": 10000, "phase": 1}
+    assert saved == {"login": 222, "server": "New-Srv", "switched_utc": saved["switched_utc"], "account_size": 15000, "phase": 1}
     assert "pw" not in (tmp_path / "account.json").read_text()
 
 
@@ -335,7 +340,7 @@ def test_account_switch_validates_and_skips_same_account(tmp_path):
 def test_switch_to_real_needs_switch_real_confirmation(monkeypatch):
     srv, url = _server(monkeypatch)
     body = {"action": "switch_account", "login": "123456", "server": "S", "password": "pw", "account_type": "real",
-            "account_size": "10000", "phase": "1"}
+            "account_size": "15000", "phase": "1"}
     assert _req(url + "/api/command", data={**body, "confirm": "SWITCH"}, basic=True)[0] == 400
     code, cmd = _req(url + "/api/command", data={**body, "confirm": "SWITCH REAL"}, basic=True)
     assert code == 200 and cmd["account_type"] == "real"
@@ -367,7 +372,7 @@ def test_account_switch_requires_account_type(tmp_path):
     from dashboard import account_switch as sw
     assert "demo or real" in sw.validate({"login": "123", "server": "S", "password": "p"})[3]
     assert sw.validate({"login": "123", "server": "S", "password": "p", "account_type": "demo",
-                        "account_size": "10000", "phase": "2"})[3] == ""
+                        "account_size": "15000", "phase": "2"})[3] == ""
 
 
 # ---- account size + phase on switch (loss limits measured from the bought size) ---------
@@ -376,8 +381,8 @@ def test_account_switch_requires_size_and_phase(tmp_path):
     base = {"login": "123", "server": "S", "password": "p", "account_type": "demo"}
     assert "account size" in sw.validate({**base, "phase": "1"})[3]
     assert "account size" in sw.validate({**base, "account_size": "7000", "phase": "1"})[3]
-    assert "phase" in sw.validate({**base, "account_size": "5000"})[3]
-    assert "phase" in sw.validate({**base, "account_size": "5000", "phase": "3"})[3]
+    assert "phase" in sw.validate({**base, "account_size": "6000"})[3]
+    assert "phase" in sw.validate({**base, "account_size": "6000", "phase": "3"})[3]
 
 
 def test_cloud_rejects_switch_without_valid_size(monkeypatch):
@@ -386,20 +391,20 @@ def test_cloud_rejects_switch_without_valid_size(monkeypatch):
             "account_type": "demo", "phase": "1"}
     assert _req(url + "/api/command", data=body, basic=True)[0] == 400
     assert _req(url + "/api/command", data={**body, "account_size": "7000"}, basic=True)[0] == 400
-    assert _req(url + "/api/command", data={**body, "account_size": "10000", "phase": "x"}, basic=True)[0] == 400
-    code, cmd = _req(url + "/api/command", data={**body, "account_size": "10000"}, basic=True)
-    assert code == 200 and cmd["account_size"] == 10000 and cmd["phase"] == "1"
+    assert _req(url + "/api/command", data={**body, "account_size": "15000", "phase": "x"}, basic=True)[0] == 400
+    code, cmd = _req(url + "/api/command", data={**body, "account_size": "15000"}, basic=True)
+    assert code == 200 and cmd["account_size"] == 15000 and cmd["phase"] == "1"
     srv.shutdown()
 
 
 def test_account_switch_seeds_challenge_from_chosen_size(tmp_path):
     (tmp_path / "challenge_state.json").write_text('{"phase_start_balance": 5003.0}')     # old account's state
-    st, msg, _ = _switch(FakeMT5(), tmp_path, phase="2")                                   # MT5 balance 10,000
-    assert st == "done" and "$10,000 (phase 2)" in msg
+    st, msg, _ = _switch(FakeMT5(), tmp_path, phase="2")                                   # MT5 balance 15,000
+    assert st == "done" and "$15,000 (phase 2)" in msg
     ch = json.loads((tmp_path / "challenge_state.json").read_text())
-    assert ch["phase_start_balance"] == 10000.0 and ch["phase"] == 2 and ch["result"] == "in_progress"
+    assert ch["phase_start_balance"] == 15000.0 and ch["phase"] == 2 and ch["result"] == "in_progress"
     acct = json.loads((tmp_path / "account.json").read_text())
-    assert acct["account_size"] == 10000 and acct["phase"] == 2
+    assert acct["account_size"] == 15000 and acct["phase"] == 2
     arch = [d for d in tmp_path.iterdir() if d.name.startswith("archive_111_")]
     assert json.loads((arch[0] / "challenge_state.json").read_text())["phase_start_balance"] == 5003.0
 
@@ -408,9 +413,9 @@ def test_account_switch_wrong_size_is_undone(tmp_path):
     env = tmp_path / ".env"
     env.write_text("LIVE_ACCOUNT_MODE=demo\n")
     (tmp_path / "multi_live.sqlite").write_text("old")
-    fake = FakeMT5()                                                                       # MT5 balance 10,000
-    st, msg, calls = _switch(fake, tmp_path, account_size="5000")                          # 200 % of a $5k size
-    assert st == "failed" and "$5,000 account" in msg and "10,000.00" in msg and "Still on 111" in msg
+    fake = FakeMT5()                                                                       # MT5 balance 15,000
+    st, msg, calls = _switch(fake, tmp_path, account_size="6000")                          # 250 % of a $6k size
+    assert st == "failed" and "$6,000 account" in msg and "15,000.00" in msg and "Still on 111" in msg
     assert fake.acct.login == 111 and env.read_text() == "LIVE_ACCOUNT_MODE=demo\n"
     assert (tmp_path / "multi_live.sqlite").read_text() == "old" and not (tmp_path / "challenge_state.json").exists()
     assert calls == ["stop", "start"]
@@ -474,3 +479,16 @@ def test_snapshot_tests_table_lists_live_and_paper_rows(tmp_path):
     assert t["rows"][1]["note"] == "keep watching" and "paper_ideas_status.json" in t["missing"]
     page = (Path(data.__file__).parent / "index.html").read_text(encoding="utf-8")
     assert 'id="tests"' in page and "renderTests" in page
+
+
+def test_rules_panel_names_the_firm_from_the_tracker(monkeypatch):
+    monkeypatch.setenv("PROP_CHALLENGE", "fundednext_2step")
+    f = dd.firm_rules()
+    assert f["name"] == "FundedNext Stellar 2-Step" and f["min_days"] == [5, 5] and f["daily_base"] == "initial"
+    rows = dd.rules_check(challenge={"result": "in_progress", "phase": 1, "target_usd": 16200.0, "phase_start_balance": 15000.0,
+                                     "profit_pct": 0.0, "trading_days": ["a"], "daily_loss_pct": 0.0},
+                          account={"equity": 15000.0}, multi_status={}, trades=[], processes={}, kill_switch=None,
+                          edge=None, news_events=[], now=datetime(2026, 10, 15, tzinfo=timezone.utc))
+    firm = [r for r in rows if r["group"] == "Firm"]
+    assert firm and not any("FundingPips" in str(r) for r in rows)
+    assert {r["limit"] for r in firm} >= {"≥ 5", "< 5% of the starting balance, open + closed", "< 10% (never below $13,500)"}

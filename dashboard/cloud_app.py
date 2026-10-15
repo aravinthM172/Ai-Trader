@@ -39,7 +39,7 @@ _TICK: dict = {}                                  # latest live prices (memory o
 _CMD: dict = {}                                   # latest bot command from the dashboard (memory only)
 CMD_TTL = 120                                     # seconds a command waits for the PC before expiring
 ACTIONS = ("start", "stop", "pause", "switch_account")
-ACCOUNT_SIZES = ("5000", "10000", "25000", "50000", "100000")   # FundingPips 2-step sizes (as dashboard/account_switch)
+ACCOUNT_SIZES = ("6000", "15000", "25000", "50000", "100000", "200000")   # FundedNext Stellar 2-Step sizes (as dashboard/account_switch)
 SECRET_FIELDS = ("password",)                     # never returned to the page, wiped once the PC has it
 MAX_POINTS = 50_000
 

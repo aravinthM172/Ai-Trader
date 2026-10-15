@@ -127,10 +127,11 @@ button.theme { margin-left: auto; }
     <form class="acct-form" id="acctForm" autocomplete="off">
       <label>Login (account number)<input type="text" id="acctLogin" inputmode="numeric" pattern="[0-9]{3,15}" required></label>
       <label>Password<input type="password" id="acctPw" autocomplete="new-password" required></label>
-      <label>Server (as MT5 shows it)<input type="text" id="acctServer" placeholder="FundingPips-Trial" required></label>
+      <label>Server (as MT5 shows it)<input type="text" id="acctServer" placeholder="FundedNext-Server 2" required></label>
       <label>Account size (the size you bought)<select id="acctSize" required>
-        <option value="">Choose…</option><option value="5000">$5,000</option><option value="10000">$10,000</option>
+        <option value="">Choose…</option><option value="6000">$6,000</option><option value="15000">$15,000</option>
         <option value="25000">$25,000</option><option value="50000">$50,000</option><option value="100000">$100,000</option>
+        <option value="200000">$200,000</option>
       </select></label>
       <label>Challenge phase<select id="acctPhase" required>
         <option value="1">Phase 1 (8 % target)</option><option value="2">Phase 2 (5 % target)</option>
@@ -143,8 +144,8 @@ button.theme { margin-left: auto; }
         <label class="check" style="grid-column:auto"><input type="radio" name="acctType" value="real"> Real money</label>
       </fieldset>
       <div class="small" id="acctRealWarn" hidden style="grid-column:1/-1;color:var(--critical);font-weight:600">
-        Real money: the bot will place real orders on this account after you press Start. Most prop-firm accounts
-        (FundingPips included) are Demo type even when funded; MT5 shows the type, and the switch is undone if it does not match.</div>
+        Real money: the bot will place real orders on this account after you press Start. Prop-firm accounts differ
+        (FundedNext shows as Real, others as Demo even when funded); MT5 shows the type, and the switch is undone if it does not match.</div>
       <label class="check"><input type="checkbox" id="acctClose"> Close the bot's open trades first (otherwise the switch is refused while it has trades)</label>
       <label><span id="acctConfirmLbl">Type SWITCH to confirm</span><input type="text" id="acctConfirm" autocomplete="off" required></label>
       <div style="display:flex;gap:8px"><button class="tab btn-start" type="submit">Switch account</button>
@@ -368,10 +369,12 @@ function renderTiles() {
     const prog = tgt && base ? 100 * (eq - base) / (tgt - base) : null;
     const t1 = tile(`Challenge · phase ${ch.phase} · ${ch.result}`, `${fmt(ch.profit_pct)}%`,
       `target ${money(tgt)} · ${(ch.trading_days || []).length} trading days`, prog);
-    const t2 = tile("Room today (daily loss)", money(ch.daily_headroom_usd), `limit 5% of day start · today ${fmt(ch.daily_loss_pct)}%`,
-      100 * (ch.daily_headroom_usd || 0) / (base * 0.05));
-    const t3 = tile("Total room (max loss)", money(ch.total_headroom_usd), `never below ${money(base * 0.9)}`,
-      100 * (ch.total_headroom_usd || 0) / (base * 0.10));
+    const f = firm(), dref = f.daily_base === "initial" ? base : Number(ch.day_ref || base);
+    const t2 = tile("Room today (daily loss)", money(ch.daily_headroom_usd),
+      `limit ${fmt(100 * f.daily_loss, 0)}% of ${f.daily_base === "initial" ? "start" : "day start"} · today ${fmt(ch.daily_loss_pct)}%`,
+      100 * (ch.daily_headroom_usd || 0) / (dref * f.daily_loss));
+    const t3 = tile("Total room (max loss)", money(ch.total_headroom_usd), `never below ${money(base * (1 - f.max_loss))}`,
+      100 * (ch.total_headroom_usd || 0) / (base * f.max_loss));
     [[t1, "chProfit"], [t2, "chToday"], [t3, "chTotal"]].forEach(([t, id]) => {
       t.querySelector(".value").id = id; t.querySelector(".sub").id = id + "Sub";
       const b = t.querySelector(".bar > span"); if (b) b.id = id + "Bar"; });
@@ -389,10 +392,10 @@ function renderRules() {
   const n = (st) => rules.filter((r) => r.status === st).length;
   $("rulesSummary").textContent = `${n("pass")} passing · ${n("warn")} warnings · ${n("fail")} failing`;
   const level = { pass: ["good", "pass"], warn: ["warning", "warning"], fail: ["critical", "FAIL"], info: [null, "info"] };
-  for (const group of ["FundingPips", "Own"]) {
+  for (const group of ["Firm", "Own"]) {
     const rows = rules.filter((r) => r.group === group);
     const t = el("table"), h = el("tr");
-    ["Status", group === "Own" ? "Your rules" : "FundingPips 2-Step Standard", "Now", "Limit"].forEach((x) => h.append(el("th", {}, x)));
+    ["Status", group === "Own" ? "Your rules" : firm().name, "Now", "Limit"].forEach((x) => h.append(el("th", {}, x)));
     t.append(h);
     for (const r of rows) {
       const [lv, word] = level[r.status] || level.info;
@@ -404,21 +407,27 @@ function renderRules() {
   }
 }
 
+// the prop firm's rules as the tracker uses them (published by dashboard/data.py firm_rules)
+function firm() {
+  return (S && S.firm) || { name: "Prop firm challenge", daily_loss: 0.05, max_loss: 0.10, daily_base: "initial" };
+}
+
 // recompute the challenge tiles from live equity (same rules as tools/challenge_tracker.py)
 function liveChallenge(eq) {
   const ch = S && S.challenge; if (!ch || !isFinite(eq) || !$("chProfit")) return;
-  const base = Number(ch.phase_start_balance), tgt = Number(ch.target_usd), ref = Number(ch.day_ref || base);
-  const pct = 100 * (eq / base - 1), today = 100 * (ref - eq) / ref;
-  const roomToday = ref * 0.05 - (ref - eq), roomTotal = base * 0.10 - (base - eq);
+  const f = firm(), base = Number(ch.phase_start_balance), tgt = Number(ch.target_usd), ref = Number(ch.day_ref || base);
+  const dref = f.daily_base === "initial" ? base : ref;       // what the daily limit is a share of
+  const pct = 100 * (eq / base - 1), today = 100 * (ref - eq) / dref;
+  const roomToday = dref * f.daily_loss - (ref - eq), roomTotal = base * f.max_loss - (base - eq);
   const pc = $("chProfit"); pc.textContent = `${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct))}%`;
   pc.className = "value " + (pct > 0 ? "pl-pos" : pct < 0 ? "pl-neg" : "pl-flat");
   $("chProfitSub").textContent = `target ${money(tgt)} · ${money(Math.max(0, tgt - eq))} to go · ${(ch.trading_days || []).length} trading days`;
   if ($("chProfitBar")) $("chProfitBar").style.width = Math.max(0, Math.min(100, 100 * (eq - base) / (tgt - base))) + "%";
   $("chToday").textContent = money(roomToday);
-  $("chTodaySub").textContent = `limit 5% of ${money(ref)} · today ${today > 0 ? "−" : "+"}${fmt(Math.abs(today))}%`;
-  if ($("chTodayBar")) $("chTodayBar").style.width = Math.max(0, Math.min(100, 100 * roomToday / (ref * 0.05))) + "%";
+  $("chTodaySub").textContent = `limit ${fmt(100 * f.daily_loss, 0)}% of ${money(dref)} · today ${today > 0 ? "−" : "+"}${fmt(Math.abs(today))}%`;
+  if ($("chTodayBar")) $("chTodayBar").style.width = Math.max(0, Math.min(100, 100 * roomToday / (dref * f.daily_loss))) + "%";
   $("chTotal").textContent = money(roomTotal);
-  if ($("chTotalBar")) $("chTotalBar").style.width = Math.max(0, Math.min(100, 100 * roomTotal / (base * 0.10))) + "%";
+  if ($("chTotalBar")) $("chTotalBar").style.width = Math.max(0, Math.min(100, 100 * roomTotal / (base * f.max_loss))) + "%";
 }
 
 function renderTfs() {
