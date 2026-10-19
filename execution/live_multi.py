@@ -51,7 +51,7 @@ from news.filter import NewsFilter
 from risk import margin_cap
 from risk import portfolio_guard as pg
 from risk import prop_controls
-from strategy import btc_h1_signal, calm_filter, regime_filter, reversal_exit
+from strategy import btc_h1_signal, calm_filter, regime_filter, reversal_exit, weekend_flat
 
 load_dotenv()
 log = get_logger("multi.live", filename="multi_live.log")
@@ -147,6 +147,10 @@ NOTIONAL_CAP = _env_f("MULTI_NOTIONAL_CAP", 0.0)
 REVERSAL_EXIT_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_REVERSAL_EXIT_SYMBOLS", ""))
 REVERSAL_MIN_PROFIT_ATR = _env_f("MULTI_REVERSAL_MIN_PROFIT_ATR", reversal_exit.MIN_PROFIT_ATR)
 REVERSAL_CANDLE_ATR = _env_f("MULTI_REVERSAL_CANDLE_ATR", reversal_exit.CANDLE_ATR)
+# weekend-flat symbols (strategy/weekend_flat.py), e.g. MULTI_WEEKEND_FLAT_SYMBOLS=BTCUSD,ETHUSD: open positions are
+# closed from Friday 20:00 UTC and nothing new is opened until Sunday 21:00 UTC.  FundedNext trades crypto Monday to
+# Friday only.  Backtest 2026-10-17: same profit, worst day -$523 -> -$318 (Monday gaps avoided).
+WEEKEND_FLAT_SYMBOLS = regime_filter.parse_symbols(os.getenv("MULTI_WEEKEND_FLAT_SYMBOLS", ""))
 
 
 def symbol_max_risk(symbol: str) -> float:
@@ -534,13 +538,15 @@ def run_once(*, now: datetime | None = None) -> dict:
         mine = [p for p in gw.positions() if p["magic"] in magics]
         _adopt_open(gw, c, mine, groups)
 
-        # manage: time exit + missing-SL repair
+        # manage: weekend flat + time exit + missing-SL repair
         for p in mine:
             spec = specs.get(p["symbol"])
             if spec is None:
                 continue
             held_h = (now - gw.to_utc(p["time"])).total_seconds() / 3600.0
-            if held_h >= MAX_HOLD_H:
+            if p["symbol"] in WEEKEND_FLAT_SYMBOLS and weekend_flat.close_due(now):
+                _close(gw, spec, p, "weekend", c)
+            elif held_h >= MAX_HOLD_H:
                 _close(gw, spec, p, "time", c)
             elif p["sl"] <= 0:
                 row = c.execute("SELECT sl, tp FROM trades WHERE ticket=?", (p["ticket"],)).fetchone()
@@ -579,6 +585,9 @@ def run_once(*, now: datetime | None = None) -> dict:
             for s in syms:
                 key = f"{s}|{due}"
                 if key in evaluated:
+                    continue
+                if s in WEEKEND_FLAT_SYMBOLS and weekend_flat.in_flat_window(now):
+                    status["entries"][s] = {"decision": "skip", "reason": "weekend flat (Fri 20:00 - Sun 21:00 UTC)"}
                     continue
                 cap_used = 0.0
                 if s in NOTIONAL_CAP_SYMBOLS and NOTIONAL_CAP > 0:      # read again: an order sent this pass counts

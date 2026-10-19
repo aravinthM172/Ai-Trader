@@ -47,7 +47,7 @@ REFERENCE = {
 }
 MIN_FOR_VERDICT = 10            # live trades in a market before its average is judged at all
 SLIPPED_R = -1.25
-BOT_EXITS = {"reversal", "no_sl", "prop_flatten", "idea_loss", "emergency"}
+BOT_EXITS = {"reversal", "no_sl", "prop_flatten", "idea_loss", "emergency", "weekend"}
 DONE = {10008, 10009, 10010}
 
 
