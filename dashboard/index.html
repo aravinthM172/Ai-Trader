@@ -265,6 +265,9 @@ body.wide main, body.wide .topbar-in { max-width: none; }
   display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
 .hud .dim > span, .hud .hud-pos > span { white-space: nowrap; } .hud .dim > span:nth-child(even) { text-align: right; }
 .hud:hover .dim { opacity: 1; }
+.hud { cursor: grab; touch-action: none; user-select: none; } .hud.dragging { cursor: grabbing; opacity: .9; }
+.hud-grip { padding-right: 18px; }
+.hud-tog { display: none !important; } .chart-card:fullscreen .hud-tog { display: inline-flex !important; }
 .hud-x { position: absolute; top: 4px; right: 6px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 12px; }
 /* position badge inside each chart that holds an open trade */
 .posbadge { position: absolute; top: 40px; left: 6px; z-index: 3; font: 600 11.5px Inter, system-ui, sans-serif; padding: 2px 8px;
@@ -557,7 +560,11 @@ ul.list { margin: 0; padding-left: 18px; } ul.list li { margin: 4px 0; }
 
 <script>
 const $ = (id) => document.getElementById(id);
-const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// theme colours, cached (getComputedStyle forces a style recalc each call); cleared when the theme changes
+const CSSV = new Map();
+const css = (v) => { let c = CSSV.get(v); if (c === undefined) { c = getComputedStyle(document.documentElement).getPropertyValue(v).trim(); CSSV.set(v, c); } return c; };
+new MutationObserver(() => CSSV.clear()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => CSSV.clear());
 // all times in the viewer's local time zone (IST in India), 12-hour clock
 const T12 = {hour: "numeric", minute: "2-digit", hour12: true};
 const tm = (v) => new Date(v).toLocaleTimeString([], T12);
@@ -611,6 +618,9 @@ function sparkline(values, cls = "spark") {
 }
 function flash(node, from, to) {
   if (!node || !isFinite(from) || !isFinite(to) || from === to) return;
+  // Web Animations: restarts without forcing a layout (the old remove / offsetWidth / add trick reflowed the page per price)
+  if (node.animate) { node.animate([{ background: `color-mix(in srgb, var(${to > from ? "--good" : "--critical"}) 28%, transparent)` },
+    { background: "transparent" }], { duration: 800, easing: "ease-out" }); return; }
   node.classList.remove("flash-up", "flash-dn"); void node.offsetWidth; node.classList.add(to > from ? "flash-up" : "flash-dn");
 }
 const STATUS = { good: ["--good", "✓"], warning: ["--warning", "!"], serious: ["--serious", "!"], critical: ["--critical", "✕"] };
@@ -635,7 +645,7 @@ function theme() {
   const light = t ? t === "light" : matchMedia("(prefers-color-scheme: light)").matches;
   document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
   try { localStorage.setItem("theme", document.documentElement.getAttribute("data-theme")); } catch (e) {}
-  buildCharts(); render();
+  CSSV.clear(); buildCharts(); render();          // clear the colour cache first: the charts are rebuilt right away
 }
 try { const t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
 $("themeBtn").onclick = theme;
@@ -682,7 +692,13 @@ const LAYOUTS = [["1", "▣", "1 chart"], ["2v", "◫", "2 side by side"], ["2h"
 const LAYOUT_N = { "1": 1, "2v": 2, "2h": 2, "3": 3, "3v": 3, "4": 4, "6": 6 };
 const TFS = [["M1", "1m", 60], ["M5", "5m", 300], ["M15", "15m", 900], ["H1", "1h", 3600], ["H4", "4h", 14400], ["D1", "D", 86400]];
 const TF_SEC = Object.fromEntries(TFS.map(([k, , s]) => [k, s]));
-let layout = "1", paneCfg = [], active = 0, syncCross = true, syncTime = true, maxed = -1, syncing = false;
+let layout = "1", paneCfg = [], active = 0, syncCross = true, syncTime = true, maxed = -1, driver = -1;
+// run fn once in the next animation frame (the latest call per key wins)
+const FRAME = new Map();
+function frame(key, fn) {
+  if (!FRAME.has(key)) requestAnimationFrame(() => { const f = FRAME.get(key); FRAME.delete(key); try { f(); } catch (e) { console.error(e); } });
+  FRAME.set(key, fn);
+}
 try {
   const c = JSON.parse(localStorage.getItem("chartLayout") || "null");
   if (c) { layout = LAYOUT_N[c.layout] ? c.layout : "1"; paneCfg = Array.isArray(c.panes) ? c.panes : []; active = c.active || 0;
@@ -748,12 +764,21 @@ function nearestBar(data, t) {                  // last bar at or before t (bina
 function legend(i, bar) {
   const p = P[i]; if (!p) return;
   const b = bar || p.data[p.data.length - 1];
-  if (!b) { p.legend.textContent = ""; return; }
-  const chg = b.open ? 100 * (b.close / b.open - 1) : 0, d = dec(b.close);
+  if (!p.lg) {                                   // built once; crosshair moves only change the text (no DOM rebuild per mouse move)
+    p.lg = { t: el("b"), o: el("b"), h: el("b"), l: el("b"), c: el("b"), chg: el("span"), ohlc: el("span") };
+    p.lg.ohlc.append("O ", p.lg.o, " H ", p.lg.h, " L ", p.lg.l, " C ", p.lg.c, " ", p.lg.chg);
+    p.legend.replaceChildren(p.lg.t, p.lg.ohlc);
+  }
+  const set = (n, v) => { if (n.textContent !== v) n.textContent = v; };
   const tfl = (TFS.find(([k]) => k === p.cfg.tf) || [, ""])[1];
-  p.legend.replaceChildren(el("b", {}, `${short(p.cfg.sym)} · ${tfl}  `), "O ", el("b", {}, fmt(b.open, d)), " H ", el("b", {}, fmt(b.high, d)),
-    " L ", el("b", {}, fmt(b.low, d)), " C ", el("b", {}, fmt(b.close, d)), " ",
-    el("span", { class: chg >= 0 ? "pl-pos" : "pl-neg" }, `${chg >= 0 ? "+" : ""}${fmt(chg, 2)}%`));
+  set(p.lg.t, `${short(p.cfg.sym)} · ${tfl}  `);
+  p.lg.ohlc.hidden = !b;
+  if (b) {
+    const chg = b.open ? 100 * (b.close / b.open - 1) : 0, d = dec(b.close);
+    set(p.lg.o, fmt(b.open, d)); set(p.lg.h, fmt(b.high, d)); set(p.lg.l, fmt(b.low, d)); set(p.lg.c, fmt(b.close, d));
+    set(p.lg.chg, `${chg >= 0 ? "+" : ""}${fmt(chg, 2)}%`);
+    const cls = chg >= 0 ? "pl-pos" : "pl-neg"; if (p.lg.chg.className !== cls) p.lg.chg.className = cls;
+  }
   if (!p.indRow) {                               // clickable indicator list (like TradingView's legend): click to show / hide
     p.indRow = el("span", { class: "ind" });
     for (const [k, label, color] of [["ema", "EMA 96", "--warning"], ["rsi", "RSI 14", "--accent"], ["trades", "Trades", "--text-secondary"],
@@ -770,7 +795,7 @@ function legend(i, bar) {
     b.setAttribute("aria-pressed", String(on));
   }
   p.indRow.querySelector('[data-k="ema"]').hidden = p.cfg.tf !== "H1";
-  p.legend.append(p.indRow);
+  if (p.indRow.parentNode !== p.legend) p.legend.append(p.indRow);
 }
 function zoomPane(i, how) {
   const c = P[i]; if (!c || !c.data.length) return;
@@ -822,25 +847,29 @@ function buildPanes() {
     const pane = { cfg, chart, candles, ema, rsi, lines: [], posLines: [], data: [], lastBar: null, liveLine: null, lastTick: 0, box, cell,
                    legend: lg, sig, cpx, nodata: null, badge };
     P.push(pane);
+    // only the pane under the pointer drives the others: programmatic moves on the followers never echo back
+    // (the echo made zoom / drag jump on release), and the follower work runs once per frame, not per mouse event
+    // capture phase: set before the chart's own handlers move the range
+    for (const ev of ["pointerenter", "pointerdown", "pointermove", "wheel", "touchstart"])
+      box.addEventListener(ev, () => { driver = i; }, { capture: true, passive: true });
     chart.subscribeCrosshairMove((param) => {
       pane.hover = !!(param && param.time);
-      legend(i, pane.hover ? param.seriesData.get(candles) : null);
-      if (!syncCross || syncing) return;
-      syncing = true;
-      for (const [j, q] of P.entries()) {
-        if (j === i) continue;
-        try {
-          if (!param || !param.time || !param.point) q.chart.clearCrosshairPosition();
-          else { const b = nearestBar(q.data, param.time); if (b) q.chart.setCrosshairPosition(b.close, b.time, q.candles); }
-        } catch (e) {}
-      }
-      syncing = false;
+      pane.hoverBar = pane.hover ? param.seriesData.get(candles) : null;
+      frame(`lg${i}`, () => legend(i, pane.hoverBar));
+      if (!syncCross || driver !== i) return;
+      const t = param && param.time && param.point ? param.time : null;
+      frame("cross", () => {
+        for (const [j, q] of P.entries()) {
+          if (j === i) continue;
+          try { const b = t ? nearestBar(q.data, t) : null; if (b) q.chart.setCrosshairPosition(b.close, b.time, q.candles); else q.chart.clearCrosshairPosition(); } catch (e) {}
+        }
+      });
     });
     chart.timeScale().subscribeVisibleTimeRangeChange((r) => {
-      if (!syncTime || syncing || !r) return;
-      syncing = true;
-      for (const [j, q] of P.entries()) if (j !== i && q.cfg.tf === cfg.tf && q.data.length) { try { q.chart.timeScale().setVisibleRange(r); } catch (e) {} }
-      syncing = false;
+      if (!syncTime || driver !== i || !r) return;
+      frame("time", () => {
+        for (const [j, q] of P.entries()) if (j !== i && q.cfg.tf === cfg.tf && q.data.length) { try { q.chart.timeScale().setVisibleRange(r); } catch (e) {} }
+      });
     });
     fillPane(i);
   }
@@ -879,6 +908,10 @@ function renderLayouts() {
     tog("clock", " Time", "Sync scrolling across charts with the same timeframe", syncTime, () => { syncTime = !syncTime; }),
     tog("wide", " Wide", "Give the charts the full width (hide the watchlist and side panels)", wide, () => {
       wide = !wide; document.body.classList.toggle("wide", wide); try { localStorage.setItem("chartWide", wide ? "1" : "0"); } catch (e) {} }), fs);
+  const hb = el("button", { class: "tab hud-tog", id: "hudTog", type: "button", "aria-pressed": String(!hudOff),
+    title: "Show / hide the open P/L panel (drag the panel to move it)" }, "P/L");
+  hb.onclick = () => setHudOff(!hudOff);
+  T.append(hb);
 }
 
 // One-word bot status: RUNNING / PAUSED / OFF / DRY-RUN / NOT UPDATING / UNKNOWN
@@ -1020,14 +1053,19 @@ function updatePosLabels(positions, quotes) {
       const risk = vpu && p.sl ? Math.abs(p.price_open - p.sl) * vpu * p.volume : null;
       const reward = vpu && p.tp ? Math.abs(p.tp - p.price_open) * vpu * p.volume : null;
       const L = c.posLines.find((x) => x.ticket === p.ticket) || c.posLines.find((x) => x.type === p.type);
-      if (L) {
-        L.entry.applyOptions({ title: `${p.type} ${p.volume}  ${plText(pl)}`, color: pl >= 0 ? css("--good") : css("--critical") });
-        if (L.sl) L.sl.applyOptions({ title: risk != null ? `SL −$${fmt(risk)}` : "SL" });
-        if (L.tp) L.tp.applyOptions({ title: reward != null ? `TP +$${fmt(reward)}` : "TP" });
+      if (L) {                                    // each applyOptions repaints the chart: only when the label really changed
+        const opt = (line, o) => { const k = JSON.stringify(o); if (line && line._k !== k) { line._k = k; line.applyOptions(o); } };
+        opt(L.entry, { title: `${p.type} ${p.volume}  ${plText(pl)}`, color: pl >= 0 ? css("--good") : css("--critical") });
+        opt(L.sl, { title: risk != null ? `SL −$${fmt(risk)}` : "SL" });
+        opt(L.tp, { title: reward != null ? `TP +$${fmt(reward)}` : "TP" });
       }
-      badge.push(el("span", { class: pl > 0 ? "pl-pos" : pl < 0 ? "pl-neg" : "pl-flat" }, `${p.type === "BUY" ? "▲" : "▼"} ${p.type} ${p.volume} · ${plText(pl)}`));
+      badge.push([pl > 0 ? "pl-pos" : pl < 0 ? "pl-neg" : "pl-flat", `${p.type === "BUY" ? "▲" : "▼"} ${p.type} ${p.volume} · ${plText(pl)}`]);
     }
-    c.badge.replaceChildren(...badge.flatMap((b, i) => i ? [" · ", b] : [b]));
+    const key = JSON.stringify(badge);
+    if (c.badgeKey !== key) {
+      c.badgeKey = key;
+      c.badge.replaceChildren(...badge.flatMap(([cls, txt], i) => { const b = el("span", { class: cls }, txt); return i ? [" · ", b] : [b]; }));
+    }
   }
 }
 // ---- market pulse: bull / bear gauge, momentum histogram and nearest order blocks per market (context only) ----
@@ -1150,22 +1188,55 @@ function rooms(eq) {
   return { today: dref * f.daily_loss - (ref - eq), total: base * f.max_loss - (base - eq), toTarget: Number(ch.target_usd) - eq,
            pct: 100 * (eq / base - 1) };
 }
-let hudOff = false;
+// full-screen P/L panel: ✕ hides it, the "P/L" button in the chart tools brings it back; drag it by its top line
+let hudOff = false, hudPos = null, hudLast = null;
+try { hudOff = localStorage.getItem("hudOff") === "1"; hudPos = JSON.parse(localStorage.getItem("hudPos") || "null"); } catch (e) {}
+function setHudOff(v) {
+  hudOff = v; try { localStorage.setItem("hudOff", v ? "1" : "0"); } catch (e) {}
+  const H = $("hud"); if (H) H.hidden = v;
+  if (!v && hudLast) renderHud(...hudLast);
+  const b = $("hudTog"); if (b) b.setAttribute("aria-pressed", String(!v));
+}
+function placeHud() {                            // keep the saved spot inside the chart card (screens differ in size)
+  const H = $("hud"), C = $("chartCard"); if (!H || !C || !hudPos) return;
+  const x = Math.max(0, Math.min(C.clientWidth - H.offsetWidth, hudPos.x)), y = Math.max(0, Math.min(C.clientHeight - H.offsetHeight, hudPos.y));
+  H.style.left = x + "px"; H.style.top = y + "px"; H.style.right = "auto";
+}
+(function hudDrag() {
+  const H = $("hud"); if (!H) return;
+  let start = null;
+  H.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button")) return;
+    start = { x: e.clientX, y: e.clientY, l: H.offsetLeft, t: H.offsetTop }; H.setPointerCapture(e.pointerId); H.classList.add("dragging"); e.preventDefault();
+  });
+  H.addEventListener("pointermove", (e) => {
+    if (!start) return;
+    hudPos = { x: start.l + e.clientX - start.x, y: start.t + e.clientY - start.y }; frame("hud", placeHud);
+  });
+  const end = () => { if (!start) return; start = null; H.classList.remove("dragging"); try { localStorage.setItem("hudPos", JSON.stringify(hudPos)); } catch (e) {} };
+  H.addEventListener("pointerup", end); H.addEventListener("pointercancel", end);
+  H.addEventListener("dblclick", (e) => { if (e.target.closest("button")) return;   // double-click: back to the default corner
+    hudPos = null; H.style.left = H.style.top = H.style.right = ""; try { localStorage.removeItem("hudPos"); } catch (x) {} });
+  document.addEventListener("fullscreenchange", () => requestAnimationFrame(placeHud));
+  window.addEventListener("resize", () => frame("hud", placeHud));
+})();
 function renderHud(positions, account) {
+  hudLast = [positions, account];
   const H = $("hud"); if (!H || hudOff) { if (H) H.hidden = hudOff; return; }
+  H.hidden = false;
   const open = positions.reduce((a, p) => a + (Number(p.profit) || 0) + (Number(p.swap) || 0), 0);
   const eq = Number(account.equity), rm = rooms(eq), [lvl, word] = S ? botStatus(S) : ["unknown", "–"];
-  const x = el("button", { class: "hud-x", type: "button", title: "Hide this panel (until the page reloads)", "aria-label": "Hide panel" }, "✕");
-  x.onclick = () => { hudOff = true; H.hidden = true; };
+  const x = el("button", { class: "hud-x", type: "button", title: "Hide this panel (the P/L button in the chart tools shows it again)", "aria-label": "Hide panel" }, "✕");
+  x.onclick = () => setHudOff(true);
   const kv = (k, v) => [el("span", { class: "muted" }, k), el("span", {}, v)];
-  H.replaceChildren(x, el("div", { class: "muted small" }, `Open P/L · ${positions.length} trade${positions.length === 1 ? "" : "s"}`),
+  H.replaceChildren(x, el("div", { class: "muted small hud-grip", title: "Drag to move · double-click to reset" }, `⠿ Open P/L · ${positions.length} trade${positions.length === 1 ? "" : "s"}`),
     el("div", { class: "pl-big " + (open > 0 ? "pl-pos" : open < 0 ? "pl-neg" : "pl-flat") }, plText(open)),
     el("div", { class: "hud-pos" }, ...positions.flatMap((p) => { const v = (Number(p.profit) || 0) + (Number(p.swap) || 0);
       return [el("span", {}, `${p.type === "BUY" ? "▲" : "▼"} ${short(p.symbol)} ${p.volume}`), plSpan(v)]; })),
     el("div", { class: "dim" }, ...kv("Equity", money(eq)), ...kv("Balance", money(account.balance)),
       ...(rm ? [...kv("Challenge", `${rm.pct >= 0 ? "+" : "−"}${fmt(Math.abs(rm.pct))} % · ${money(Math.max(0, rm.toTarget))} to target`),
                 ...kv("Room today", money(rm.today)), ...kv("Total room", money(rm.total))] : []),
-      ...kv("Bot", word), ...kv("Next check", ($("sigCountdown") || {}).textContent || "–")));
+      ...kv("Bot", word), ...kv("Next check", (($("sigCountdown") || {}).textContent || "–").replace(/^next check\s*/i, ""))));
 }
 function liveChallenge(eq) {
   const ch = S && S.challenge; if (!ch || !isFinite(eq) || !$("chProfit")) return;
@@ -1221,9 +1292,16 @@ function exitLabel(t) {
   if (!t.closed_utc) return "open";
   return t.exit_reason === "target" ? "TP hit" : t.exit_reason === "stop" ? "SL hit" : "closed";
 }
-let paneKey = "";
+let paneKey = "", chartHeld = false, chartsPending = false;
+// while a chart is being dragged / zoomed the 30 s refresh waits until the button is released (no jump mid-gesture)
+$("charts").addEventListener("pointerdown", () => { chartHeld = true; });
+for (const ev of ["pointerup", "pointercancel"]) window.addEventListener(ev, () => {
+  if (!chartHeld) return; chartHeld = false;
+  if (chartsPending) { chartsPending = false; setTimeout(() => { try { renderCharts(); } catch (e) { console.error(e); } }, 150); }
+});
 function renderCharts() {
   const syms = allSyms(); if (!syms.length) return;
+  if (chartHeld && P.length) { chartsPending = true; return; }
   const key = syms.join() + "|" + layout;
   if (!P.length || key !== paneKey) { paneKey = key; buildPanes(); }
   else P.forEach((_, i) => fillPane(i));
@@ -1259,7 +1337,7 @@ function fillPane(i) {
   if (c.liveLine) { c.candles.removePriceLine(c.liveLine); c.liveLine = null; }
   c.lastTick = 0;
   legend(i, null);
-  setTimeout(() => { try { renderLivePL(); } catch (e) {} }, 0);   // P/L labels + badge for the pane's (new) market
+  frame("livepl", renderLivePL);                 // P/L labels + badge for the pane's (new) market (once, however many panes refill)
   {
     for (const pl of c.lines) c.candles.removePriceLine(pl); c.lines = [];
     const step = TF_SEC[tf] || 3600;
