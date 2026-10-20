@@ -69,3 +69,10 @@ def test_fixed_lot_and_hard_cap(monkeypatch, tmp_path):
     assert p["volume"] == pytest.approx(0.2)
     big = _plan(monkeypatch, tmp_path, _mk(mode="lots", lots=40))                            # would risk ~$8,000
     assert big["risk_usd"] <= 150 + 1e-6                                                     # 1 % of $15k
+
+
+@pytest.mark.skipif(not hasattr(lm, "parse_symbol_count"), reason="per-symbol patch not applied yet")
+def test_parse_symbol_count():
+    assert lm.parse_symbol_count("BTCUSD=2") == {"BTCUSD": 2}
+    assert lm.parse_symbol_count("BTCUSD=2, ETHUSD=x, NDX100=9, XAUUSD=0") == {"BTCUSD": 2}   # bad / out of range ignored
+    assert lm.parse_symbol_count("") == {}
