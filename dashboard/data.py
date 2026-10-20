@@ -185,6 +185,27 @@ def next_entry_window(now: datetime) -> dict:
 
 
 # -- MT5 (read-only, cached) ----------------------------------------------------------
+def _sizing(gw, symbol: str, done: pd.DataFrame) -> dict | None:
+    """What the dashboard's settings calculator needs: ATR14 of the last closed H1 bar and the contract figures
+    the bot sizes with ($ per 1.0 price move per lot, lot min / step / max)."""
+    try:
+        from backtest.btc_strategies import base_atr
+        spec = gw.get_spec(symbol)
+        atr = float(base_atr(done["high"].to_numpy(float), done["low"].to_numpy(float), done["close"].to_numpy(float), 14)[-1])
+        return {"atr": atr, "value_per_unit": spec.value_per_price_unit_per_lot, "vmin": spec.volume_min,
+                "vstep": spec.volume_step, "vmax": spec.volume_max, "contract": spec.contract_size}
+    except Exception:
+        return None
+
+
+def bot_settings_view() -> dict:
+    """Saved dashboard settings plus the .env values the bot falls back to (for the settings panel)."""
+    from strategy import bot_settings
+    return {"saved": bot_settings.load(), "hard_max_risk": bot_settings.HARD_MAX_RISK, "limits": bot_settings.LIMITS,
+            "env": {"risk_pct": 100 * float(os.getenv("MULTI_RISK_PER_TRADE", "0.005")),
+                    "max_risk_pct": 100 * float(os.getenv("MULTI_MAX_RISK_PER_TRADE", "0.01")), "sl_atr": 2.0, "tp_atr": 6.0}}
+
+
 def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
     key = ("market", tuple(symbols))
     hit = _cache.get(key)
@@ -227,7 +248,8 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                         "forming": forming_preview(df, now) if len(done) > 120 else None,
                         "bid": tick.get("bid"), "ask": tick.get("ask"), "spread": tick.get("spread"),
                         "tick_age_s": tick.get("age_seconds"),
-                        "group": (info.path or "").split("\\")[0] if info else "", "regime": regime}
+                        "group": (info.path or "").split("\\")[0] if info else "", "regime": regime,
+                        "sizing": _sizing(gw, s, done)}
             finally:
                 gw.shutdown()
     except Exception as e:
@@ -495,4 +517,12 @@ def gather() -> dict:
         "alerts": alerts,
         "strength": symbol_strength(trades),
         "tests": tests_table(now=now),
+        "bot_settings": _safe(bot_settings_view),
     }
+
+
+def _safe(f):
+    try:
+        return f()
+    except Exception as e:
+        return {"error": str(e)}

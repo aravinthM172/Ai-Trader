@@ -51,7 +51,7 @@ from news.filter import NewsFilter
 from risk import margin_cap
 from risk import portfolio_guard as pg
 from risk import prop_controls
-from strategy import btc_h1_signal, calm_filter, regime_filter, reversal_exit, weekend_flat
+from strategy import bot_settings, btc_h1_signal, calm_filter, regime_filter, reversal_exit, weekend_flat
 
 load_dotenv()
 log = get_logger("multi.live", filename="multi_live.log")
@@ -243,9 +243,10 @@ def loss_value_per_unit(spec, calc_value: float | None, account_ccy: str) -> tup
     return (tick_v, "ok") if tick_v > 0 else (None, "no tick value")
 
 
-def stop_plan(direction: str, price: float, atr: float, stops_level: float) -> tuple[float, float, float]:
-    sl_d = max(SL_ATR * atr, stops_level * 1.15)
-    tp_d = max(TP_ATR * atr, stops_level * 1.15)
+def stop_plan(direction: str, price: float, atr: float, stops_level: float,
+              sl_atr: float = SL_ATR, tp_atr: float = TP_ATR) -> tuple[float, float, float]:
+    sl_d = max(sl_atr * atr, stops_level * 1.15)
+    tp_d = max(tp_atr * atr, stops_level * 1.15)
     sl = price - sl_d if direction == "BUY" else price + sl_d
     tp = price + tp_d if direction == "BUY" else price - tp_d
     return sl, tp, sl_d
@@ -582,9 +583,17 @@ def run_once(*, now: datetime | None = None) -> dict:
         else:
             news = NewsFilter(fail_closed=_env_b("MULTI_NEWS_FAIL_CLOSED"))
             gst = guard_state(c, mine, groups, equity, ls["peak_equity"], now)
+            # dashboard settings (strategy/bot_settings.py): per market on/off, risk % or fixed lot, stop / target ATR,
+            # and auto risk (shrinks towards the loss floor); markets not in the file keep the .env behaviour
+            cfg = bot_settings.load()
+            auto = bot_settings.cushion_multiplier(cfg, equity)
             for s in syms:
                 key = f"{s}|{due}"
                 if key in evaluated:
+                    continue
+                mk = bot_settings.for_symbol(cfg, s)
+                if mk and not mk["enabled"]:
+                    status["entries"][s] = {"decision": "skip", "reason": "switched off in the dashboard settings"}
                     continue
                 if s in WEEKEND_FLAT_SYMBOLS and weekend_flat.in_flat_window(now):
                     status["entries"][s] = {"decision": "skip", "reason": "weekend flat (Fri 20:00 - Sun 21:00 UTC)"}
@@ -594,9 +603,10 @@ def run_once(*, now: datetime | None = None) -> dict:
                     cap_used = margin_cap.used_notional(
                         gw.positions(), {k: v.contract_size for k, v in specs.items() if v is not None},
                         NOTIONAL_CAP_SYMBOLS)
+                base = (mk["risk_pct"] / 100 if mk else symbol_risk(s)) * auto
                 status["entries"][s] = res = _evaluate_symbol(
                     gw, mt5, c, s, specs[s], groups[s], due, now, equity, news, gst, send_ok, ls,
-                    risk=min(symbol_risk(s), prop.risk_cap) if prop is not None else symbol_risk(s), cap_used=cap_used)
+                    risk=min(base, prop.risk_cap) if prop is not None else base, cap_used=cap_used, mk=mk)
                 if res.get("final"):
                     evaluated[key] = res.get("decision", "done")
                     if res.get("reason"):
@@ -615,7 +625,7 @@ def run_once(*, now: datetime | None = None) -> dict:
 
 
 def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, send_ok, ls,
-                     risk: float = RISK_PER_TRADE, cap_used: float = 0.0) -> dict:
+                     risk: float = RISK_PER_TRADE, cap_used: float = 0.0, mk: dict | None = None) -> dict:
     if spec is None:
         return {"decision": "skip", "reason": "no symbol spec", "final": True}
     df = gw.get_rates(s, "H1", 400)
@@ -657,16 +667,21 @@ def _evaluate_symbol(gw, mt5, c, s, spec, group, due, now, equity, news, gst, se
     if atr <= 0 or tick["spread"] > MAX_SPREAD_ATR * atr:
         return {**out, "decision": "retry", "reason": f"spread {tick['spread']:.5g} > {MAX_SPREAD_ATR} x ATR {atr:.5g}"}
     px = tick["ask"] if sig.decision == "BUY" else tick["bid"]
-    sl, tp, sl_d = stop_plan(sig.decision, px, atr, spec.stops_level_price)
+    sl, tp, sl_d = stop_plan(sig.decision, px, atr, spec.stops_level_price,
+                             **({"sl_atr": mk["sl_atr"], "tp_atr": mk["tp_atr"]} if mk else {}))
     vpu, vnote = loss_value_per_unit(spec, gw.calc_value_per_unit(s, sig.decision, px),
                                      (gw.account_info() or {}).get("currency", "USD"))
     if vpu is None:
         return {**out, "decision": "skip", "reason": vnote, "final": True}
     if vnote != "ok":
         log.warning("%s sizing: %s", s, vnote)
-    vol, risk_usd, note = size_volume(equity=equity, risk_frac=min(risk, symbol_max_risk(s)), max_risk_frac=symbol_max_risk(s),
-                                      sl_dist=sl_d, value_per_unit=vpu,
-                                      vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
+    if mk:                              # dashboard settings: risk % or fixed lot, never above bot_settings.HARD_MAX_RISK
+        vol, risk_usd, note = bot_settings.size(mk, equity=equity, risk_frac=risk, sl_dist=sl_d, value_per_unit=vpu,
+                                                vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
+    else:
+        vol, risk_usd, note = size_volume(equity=equity, risk_frac=min(risk, symbol_max_risk(s)), max_risk_frac=symbol_max_risk(s),
+                                          sl_dist=sl_d, value_per_unit=vpu,
+                                          vmin=spec.volume_min, vstep=spec.volume_step, vmax=spec.volume_max)
     if vol <= 0:
         return {**out, "decision": "skip", "reason": note, "final": True}
     if s in NOTIONAL_CAP_SYMBOLS and NOTIONAL_CAP > 0:

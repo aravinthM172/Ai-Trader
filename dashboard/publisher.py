@@ -120,6 +120,14 @@ def execute_command(cmd: dict, *, kill=KILL, flatten=FLATTEN, start_task=None, r
         kill.write_text(datetime.now(timezone.utc).isoformat() + "  website pause\n", encoding="utf-8")
         log.warning("WEBSITE PAUSE: kill switch set, open trades left to their SL/TP")
         return "done", "Paused: no new trades. Open trades keep their stop-loss / take-profit."
+    if action == "settings":
+        from strategy import bot_settings
+        clean, errors = bot_settings.validate(cmd.get("settings") or {})
+        if errors:
+            return "refused", "Settings not saved: " + "; ".join(errors[:5])
+        bot_settings.save(clean)
+        log.warning("WEBSITE SETTINGS saved: %s", json.dumps(clean))
+        return "done", "Settings saved. The bot uses them from its next pass (new trades only; open trades keep their SL/TP)."
     if action == "switch_account":
         from dashboard.account_switch import switch_account
         status, message = switch_account(cmd, mt5=mt5_module(), magics=bot_magics())
