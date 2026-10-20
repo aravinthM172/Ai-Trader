@@ -764,8 +764,12 @@ def _prop_controls(gw, c, ls, mine, specs, equity, balance, now, send_ok, close_
         ch = dict(ch, day_ref=ls["prop_day_ref"])
     row = c.execute("SELECT MAX(closed_utc) FROM trades WHERE status='CLOSED' AND pnl_usd < 0").fetchone()
     last_loss = datetime.fromisoformat(row[0]) if row and row[0] else None
+    # with dashboard settings saved, the per-trade ceiling is bot_settings.HARD_MAX_RISK, so the dashboard risk % and
+    # auto risk (up to 1.5x in profit) may go above the .env value; the daily-room rule still shrinks it when today's
+    # loss room is small, and MULTI_MAX_TOTAL_OPEN_RISK still caps all open trades together
+    base_cap = bot_settings.HARD_MAX_RISK if bot_settings.load() else RISK_PER_TRADE
     d = prop_controls.decide(challenge=ch, equity=equity, positions=mine, last_losing_close=last_loss, now=now,
-                             trading_day=day, halted_day=ls.get("prop_halt_day"), base_risk=RISK_PER_TRADE)
+                             trading_day=day, halted_day=ls.get("prop_halt_day"), base_risk=base_cap)
     if d.halt_today:
         ls["prop_halt_day"] = day
     for p in [p for p in mine if d.flatten_all or p["ticket"] in d.close_tickets]:

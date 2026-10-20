@@ -38,6 +38,32 @@ def test_stop_and_target_atr_from_settings(monkeypatch, tmp_path):
     assert p["entry"] - p["sl"] == pytest.approx(1.5 * p["atr"], rel=0.01)
 
 
+def _prop_base_risk(monkeypatch, tmp_path, saved):
+    """base_risk handed to prop_controls.decide by _prop_controls (the per-trade ceiling)."""
+    from datetime import datetime, timezone
+    from tools import challenge_tracker as ct
+    seen = {}
+    monkeypatch.setattr(ct, "enabled", lambda: True)
+    monkeypatch.setattr(ct, "OUT", tmp_path / "missing.json")
+    monkeypatch.setattr(lm.bot_settings, "load", lambda: saved)
+    monkeypatch.setattr(lm.prop_controls, "decide", lambda **kw: seen.update(kw) or fn.NS(halt_today=False, flatten_all=False,
+                        close_tickets=[], kill=False, allow_entries=True, risk_cap=kw["base_risk"], reasons=[], to_dict=lambda: {}))
+    c = lm._conn(tmp_path / "t.sqlite")
+    try:
+        lm._prop_controls(None, c, {}, [], {}, 15000.0, 15000.0, datetime(2026, 10, 20, 7, tzinfo=timezone.utc), False)
+    finally:
+        c.close()
+    return seen.get("base_risk")
+
+
+@pytest.mark.skipif(not hasattr(lm, "bot_settings") or "base_cap" not in open(lm.__file__, encoding="utf-8").read(),
+                    reason="allow-growth patch not applied yet")
+def test_settings_raise_the_per_trade_ceiling_to_the_hard_cap(monkeypatch, tmp_path):
+    assert _prop_base_risk(monkeypatch, tmp_path, {}) == lm.RISK_PER_TRADE                     # no settings: .env value
+    saved = {"markets": {"BTCUSD": _mk()}, "auto_risk": {"enabled": True, "start_balance": 15000, "max_loss_pct": 10}}
+    assert _prop_base_risk(monkeypatch, tmp_path, saved) == lm.bot_settings.HARD_MAX_RISK
+
+
 def test_fixed_lot_and_hard_cap(monkeypatch, tmp_path):
     p = _plan(monkeypatch, tmp_path, _mk(mode="lots", lots=0.2))
     assert p["volume"] == pytest.approx(0.2)

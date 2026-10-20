@@ -24,6 +24,11 @@ HERE = Path(__file__).parent      # VPS copies of mismatching files are saved he
 FILES = ["execution/live_multi.py", "strategy/bot_settings.py", "dashboard/data.py", "dashboard/publisher.py"]
 BASE = "07b0989"            # the commit the VPS runs (weekend-flat); the change was built on it
 CHECKED = ["execution/live_multi.py", "dashboard/data.py", "dashboard/publisher.py"]
+# later updates: --base <commit the VPS runs> --files a.py,b.py  (the files are checked against --base, then uploaded)
+if "--base" in sys.argv:
+    BASE = sys.argv[sys.argv.index("--base") + 1]
+if "--files" in sys.argv:
+    FILES = CHECKED = sys.argv[sys.argv.index("--files") + 1].split(",")
 
 CHECK = r"""
 Set-Location C:\gold-ai-trader
