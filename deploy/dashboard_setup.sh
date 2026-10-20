@@ -20,7 +20,7 @@ sudo apt-get install -y -qq python3 debian-keyring debian-archive-keyring apt-tr
 
 # --- app files --------------------------------------------------------------------
 sudo mkdir -p "$APP/dashboard" "$APP/data/dashboard"
-sudo cp ~/dashboard/cloud_app.py ~/dashboard/index.html "$APP/dashboard/"
+sudo cp ~/dashboard/cloud_app.py ~/dashboard/index.html ~/dashboard/crypto.html "$APP/dashboard/"
 sudo touch "$APP/dashboard/__init__.py"
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin trader-dash 2>/dev/null || true
 sudo chown -R trader-dash:trader-dash "$APP/data"

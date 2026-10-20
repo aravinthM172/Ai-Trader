@@ -492,3 +492,16 @@ def test_rules_panel_names_the_firm_from_the_tracker(monkeypatch):
     firm = [r for r in rows if r["group"] == "Firm"]
     assert firm and not any("FundingPips" in str(r) for r in rows)
     assert {r["limit"] for r in firm} >= {"≥ 5", "< 5% of the starting balance, open + closed", "< 10% (never below $13,500)"}
+
+
+def test_airdrops_store_and_read(tmp_path):
+    assert "error" in ca.airdrops(data_dir=tmp_path)
+    ca.store_airdrops({"candidates": [{"name": "X", "new": True}], "news": []}, data_dir=tmp_path)
+    got = ca.airdrops(data_dir=tmp_path)
+    assert got["candidates"][0]["name"] == "X" and "received_utc" in got
+
+
+def test_crypto_page_linked_from_dashboard():
+    html = (ca.HERE / "index.html").read_text(encoding="utf-8")
+    assert 'href="/crypto"' in html and 'target="_blank"' in html
+    assert "/api/airdrops" in (ca.HERE / "crypto.html").read_text(encoding="utf-8")

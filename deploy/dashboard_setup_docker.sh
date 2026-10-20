@@ -20,7 +20,7 @@ echo "== trader dashboard (docker) :: caddy=$CADDY_C net=$NET host=$HOST"
 
 # --- files -----------------------------------------------------------------------------
 sudo mkdir -p "$APP/dashboard" "$APP/data/dashboard"
-sudo cp ~/dashboard/cloud_app.py ~/dashboard/index.html "$APP/dashboard/"
+sudo cp ~/dashboard/cloud_app.py ~/dashboard/index.html ~/dashboard/crypto.html "$APP/dashboard/"
 sudo touch "$APP/dashboard/__init__.py"
 sudo chown -R 10001:10001 "$APP/data"
 

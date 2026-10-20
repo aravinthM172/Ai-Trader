@@ -10,6 +10,9 @@ Cloud dashboard server (runs on the Oracle Cloud VM).  Python stdlib only.
   GET  /api/command status of the latest command        (Basic auth)
   GET  /api/command/next  pending command for the PC    (Bearer token)
   POST /api/command/ack   PC reports the result          (Bearer token)
+  POST /api/airdrops  airdrop agent report from the laptop (Bearer token)
+  GET  /api/airdrops  latest airdrop report              (Basic auth)
+  GET  /crypto        crypto airdrop page                 (Basic auth)
   GET  /healthz     liveness                            (no auth, no data)
 
 Binds 127.0.0.1:8080 by default; Caddy in front provides HTTPS (deploy/dashboard_setup.sh).
@@ -38,7 +41,7 @@ MAX_BODY = 8 * 1024 * 1024
 _TICK: dict = {}                                  # latest live prices (memory only)
 _CMD: dict = {}                                   # latest bot command from the dashboard (memory only)
 CMD_TTL = 120                                     # seconds a command waits for the PC before expiring
-ACTIONS = ("start", "stop", "pause", "switch_account")
+ACTIONS = ("start", "stop", "pause", "switch_account", "settings")
 ACCOUNT_SIZES = ("6000", "15000", "25000", "50000", "100000", "200000")   # FundedNext Stellar 2-Step sizes (as dashboard/account_switch)
 SECRET_FIELDS = ("password",)                     # never returned to the page, wiped once the PC has it
 MAX_POINTS = 50_000
@@ -83,6 +86,21 @@ def store(snapshot: dict, *, data_dir: Path = DATA) -> None:
         hist_p.write_text(json.dumps(hist[-MAX_POINTS:]), encoding="utf-8")
 
 
+def store_airdrops(report: dict, *, data_dir: Path = DATA) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    report["received_utc"] = datetime.now(timezone.utc).isoformat()
+    tmp = data_dir / "airdrops.tmp"
+    tmp.write_text(json.dumps(report), encoding="utf-8")
+    tmp.replace(data_dir / "airdrops.json")
+
+
+def airdrops(*, data_dir: Path = DATA) -> dict:
+    try:
+        return json.loads((data_dir / "airdrops.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {"error": "no airdrop report yet -- run airdrop_agent.py on the laptop"}
+
+
 def state(*, data_dir: Path = DATA) -> dict:
     try:
         latest = json.loads((data_dir / "latest.json").read_text(encoding="utf-8"))
@@ -100,9 +118,10 @@ def state(*, data_dir: Path = DATA) -> dict:
 def new_command(body: dict) -> tuple[dict, str]:
     """Validate a command from the page -> (command, error)."""
     action, kind = body.get("action"), body.get("account_type")
-    confirm = ("SWITCH REAL" if kind == "real" else "SWITCH") if action == "switch_account" else str(action).upper()
+    confirm = ("SWITCH REAL" if kind == "real" else "SWITCH") if action == "switch_account" \
+        else "APPLY" if action == "settings" else str(action).upper()
     if action not in ACTIONS or body.get("confirm") != confirm:
-        return {}, f"action must be start/pause/stop/switch_account, confirmed with {confirm if action in ACTIONS else 'its word'}"
+        return {}, f"action must be start/pause/stop/switch_account/settings, confirmed with {confirm if action in ACTIONS else 'its word'}"
     cmd = {"id": f"{int(time.time() * 1000)}", "action": action, "force": bool(body.get("force")),
            "created": time.time(), "status": "pending", "message": "waiting for the trading PC"}
     if action == "switch_account":
@@ -122,6 +141,12 @@ def new_command(body: dict) -> tuple[dict, str]:
             return {}, "choose the challenge phase: 1 or 2"
         cmd.update(login=login, server=server, password=password, account_type=kind, account_size=int(size),
                    phase=phase, close_first=bool(body.get("close_first")))
+    if action == "settings":                     # full validation happens on the trading PC (strategy/bot_settings.py)
+        settings = body.get("settings")
+        if not isinstance(settings, dict) or not isinstance(settings.get("markets"), dict) \
+                or len(json.dumps(settings)) > 10_000:
+            return {}, "settings must be an object with a markets table"
+        cmd.update(settings=settings)
     return cmd, ""
 
 
@@ -180,6 +205,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ("/", "/index.html"):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path in ("/crypto", "/crypto.html"):
+            return self._send(200, (HERE / "crypto.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path.startswith("/api/airdrops"):
+            return self._send(200, json.dumps(airdrops()).encode())
         if self.path == "/api/command":
             return self._send(200, json.dumps(public_cmd()).encode())
         if self.path.startswith("/api/tick"):
@@ -214,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("id") == _CMD.get("id"):
                 _CMD.update(status=body.get("status", "done"), message=str(body.get("message", ""))[:500], done=time.time())
             return self._send(200, b'{"ok":true}')
-        if self.path not in ("/api/push", "/api/tick"):
+        if self.path not in ("/api/push", "/api/tick", "/api/airdrops"):
             return self._send(404, b'{"error":"not found"}')
         token, _, _ = _cfg()
         if not bearer_ok(self.headers.get("Authorization"), token):
@@ -232,6 +261,8 @@ class Handler(BaseHTTPRequestHandler):
                 data["received"] = time.time()
                 _TICK.clear()
                 _TICK.update(data)
+            elif self.path == "/api/airdrops":
+                store_airdrops(data)
             else:
                 store(data)
         except Exception:
