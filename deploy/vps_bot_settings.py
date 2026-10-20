@@ -6,12 +6,13 @@ stop / target ATR and auto risk, edited from the dashboard (strategy/bot_setting
    (the version the VPS runs), so no VPS-only change is overwritten (else nothing is changed; their copies are saved here)
 3. backups *.bak.before-settings, upload the 4 files, restart trader / watchdog / publisher outside minutes 0-15
    (open positions and MT5 untouched), confirm a fresh status file and no traceback.
-No .env change.  Until settings are saved from the dashboard the bot trades exactly as before.
+No .env change unless --env MULTI_X=value is given (one line set, backup .env.bak.<time>).
 Rollback: copy the .bak.before-settings files back, delete strategy\bot_settings.py and state\bot_settings.json, restart.
 Run:  VPS_PW=... python vps_bot_settings.py
 """
 import base64
 import hashlib
+import re
 import os
 import subprocess
 import sys
@@ -29,6 +30,10 @@ if "--base" in sys.argv:
     BASE = sys.argv[sys.argv.index("--base") + 1]
 if "--files" in sys.argv:
     FILES = CHECKED = sys.argv[sys.argv.index("--files") + 1].split(",")
+# --env KEY=VALUE: set one .env line on the VPS (backup .env.bak.<time>; the line is replaced or appended)
+ENV = sys.argv[sys.argv.index("--env") + 1] if "--env" in sys.argv else None
+if ENV and not re.fullmatch(r"MULTI_[A-Z_]+=[A-Za-z0-9_.,=]+", ENV):
+    sys.exit(f"refusing --env {ENV!r}: only MULTI_* settings with plain values")
 
 CHECK = r"""
 Set-Location C:\gold-ai-trader
@@ -45,11 +50,14 @@ CHANGE = r"""
 Set-Location C:\gold-ai-trader
 $m = (Get-Date).ToUniversalTime().Minute
 while ($m -lt 16 -or $m -gt 55) { 'minute ' + $m + ' is inside the entry window -- waiting'; Start-Sleep 60; $m = (Get-Date).ToUniversalTime().Minute }
-foreach ($f in @('execution\live_multi.py', 'strategy\bot_settings.py', 'dashboard\data.py', 'dashboard\publisher.py')) {
+foreach ($f in @(__FILES__)) {
   if ((Test-Path $f) -and -not (Test-Path "$f.bak.before-settings")) { Copy-Item $f "$f.bak.before-settings" }
-  if (Test-Path "$f.new") { Move-Item "$f.new" $f -Force; 'installed ' + $f }
+  if (Test-Path "$f.new") {
+    if (Test-Path $f) { Copy-Item $f ("$f.bak." + (Get-Date -Format yyyyMMddHHmmss)) }   # the version being replaced
+    Move-Item "$f.new" $f -Force; 'installed ' + $f
+  }
 }
-$t0 = (Get-Date).ToUniversalTime()
+__ENV__$t0 = (Get-Date).ToUniversalTime()
 $p = Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' -and $_.CommandLine -match 'execution\.live_multi|tools\.watchdog|dashboard\.publisher' }
 $p | ForEach-Object { 'stopping pid ' + $_.ProcessId + ' | ' + (('' + $_.CommandLine) -replace '.*python.exe"?\s*','') ; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 'waiting 120 s for the loops to restart'
@@ -121,7 +129,14 @@ try:
     for f in FILES:
         upload(p, sh, f)
     print("== 4. install and restart")
-    o = run(p, sh, CHANGE)
+    env_ps = ""
+    if ENV:
+        k = ENV.split("=", 1)[0]
+        env_ps = (f"Copy-Item .env ('.env.bak.' + (Get-Date -Format yyyyMMddHHmmss)); "
+                  f"$l = @(Get-Content .env | Where-Object {{ $_ -notmatch '^{k}=' }}) + '{ENV}'; Set-Content .env $l; "
+                  f"'env set: ' + (Get-Content .env | Where-Object {{ $_ -match '^{k}=' }})\n")
+    files_ps = ", ".join("'" + f.replace("/", "\\") + "'" for f in FILES)
+    o = run(p, sh, CHANGE.replace("__FILES__", files_ps).replace("__ENV__", env_ps))
     ok = "STATUS FRESH" in o and "Traceback" not in o
     print("DONE: dashboard bot settings installed (bot unchanged until settings are saved)" if ok else "CHECK: status not fresh or a traceback in the log -- look at the dashboard")
 finally:
