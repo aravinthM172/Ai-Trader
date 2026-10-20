@@ -654,7 +654,7 @@ function chartOpts(h) {
   return { height: h, layout: { background: { color: css("--surface") }, textColor: css("--text-muted"), fontSize: 11,
       fontFamily: "Inter, system-ui, sans-serif", attributionLogo: false },     // credited in the page footer instead
     grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
-    rightPriceScale: { borderColor: css("--border") }, timeScale: { borderColor: css("--border"), timeVisible: true,
+    rightPriceScale: { borderColor: css("--border") }, timeScale: { borderColor: css("--border"), timeVisible: true, fixLeftEdge: true,
       tickMarkFormatter: (t, type) => type < 3 ? new Date(t * 1000).toLocaleDateString([], {day: "numeric", month: "short"}) : tm(t * 1000) },
     localization: { timeFormatter: (t) => dtm(t * 1000) },
     crosshair: { mode: 0 },
@@ -692,7 +692,7 @@ const LAYOUTS = [["1", "▣", "1 chart"], ["2v", "◫", "2 side by side"], ["2h"
 const LAYOUT_N = { "1": 1, "2v": 2, "2h": 2, "3": 3, "3v": 3, "4": 4, "6": 6 };
 const TFS = [["M1", "1m", 60], ["M5", "5m", 300], ["M15", "15m", 900], ["H1", "1h", 3600], ["H4", "4h", 14400], ["D1", "D", 86400]];
 const TF_SEC = Object.fromEntries(TFS.map(([k, , s]) => [k, s]));
-let layout = "1", paneCfg = [], active = 0, syncCross = true, syncTime = true, maxed = -1, driver = -1;
+let layout = "1", paneCfg = [], active = 0, syncCross = true, syncTime = false, maxed = -1, driver = -1;
 // run fn once in the next animation frame (the latest call per key wins)
 const FRAME = new Map();
 function frame(key, fn) {
@@ -702,10 +702,10 @@ function frame(key, fn) {
 try {
   const c = JSON.parse(localStorage.getItem("chartLayout") || "null");
   if (c) { layout = LAYOUT_N[c.layout] ? c.layout : "1"; paneCfg = Array.isArray(c.panes) ? c.panes : []; active = c.active || 0;
-    syncCross = c.syncCross !== false; syncTime = c.syncTime !== false; }
+    syncCross = c.syncCross !== false; syncTime = c.syncTime2 === true; }   // time sync off unless chosen (drag moves one chart)
 } catch (e) {}
 function saveLayout() {
-  try { localStorage.setItem("chartLayout", JSON.stringify({ layout, active, syncCross, syncTime,
+  try { localStorage.setItem("chartLayout", JSON.stringify({ layout, active, syncCross, syncTime2: syncTime,
     panes: paneCfg.map((p) => ({ sym: p.sym, tf: p.tf })) })); } catch (e) {}
 }
 const allSyms = () => Object.keys(((S || {}).market || {}).symbols || {});
@@ -726,10 +726,10 @@ function destroyPanes() {
   P.length = 0; $("charts").innerHTML = ""; maxed = -1;
 }
 // bars for a pane: H1 / M1 from the snapshot, other timeframes resampled from them (UTC buckets)
-function resample(bars, sec) {
+function resample(bars, sec, off = 0) {          // off: where the buckets start (MT5 D1 / H4 begin at the broker's midnight)
   const out = [];
   for (const b of bars) {
-    const t = Math.floor(b.time / sec) * sec, last = out[out.length - 1];
+    const t = Math.floor((b.time - off) / sec) * sec + off, last = out[out.length - 1];
     if (last && last.time === t) { last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low); last.close = b.close; }
     else out.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close });
   }
@@ -738,6 +738,15 @@ function resample(bars, sec) {
 function barsFor(s, tf) {
   const d = (((S || {}).market || {}).symbols || {})[s] || {};
   if (tf === "H1") return (d.candles || []).map((b) => ({ ...b }));
+  const h = (d.history || {})[tf];                // [time, o, h, l, c] rows straight from MT5 (longer than resampling)
+  if (h && h.length) {
+    const own = h.map(([time, open, high, low, close]) => ({ time, open, high, low, close }));
+    const sec = TF_SEC[tf], last = own[own.length - 1].time, off = ((last % sec) + sec) % sec;
+    // the forming bar and anything newer, from the snapshot's finer bars on the same bucket grid
+    const fine = resample(tf === "M5" || tf === "M15" ? d.candles_m1 || [] : d.candles || [], sec, off);
+    for (const b of fine) { if (b.time === last) own[own.length - 1] = b; else if (b.time > last) own.push(b); }
+    return own;
+  }
   if (tf === "H4" || tf === "D1") return resample(d.candles || [], TF_SEC[tf]);
   const m1 = (d.candles_m1 || []).map((b) => ({ ...b }));
   return tf === "M1" ? m1 : resample(m1, TF_SEC[tf]);
@@ -865,10 +874,16 @@ function buildPanes() {
         }
       });
     });
-    chart.timeScale().subscribeVisibleTimeRangeChange((r) => {
+    // followers get the same window counted in bars back from their latest bar (works past the data edges, where a time
+    // range does not exist; short 5m / 15m histories stopped following before)
+    chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
       if (!syncTime || driver !== i || !r) return;
       frame("time", () => {
-        for (const [j, q] of P.entries()) if (j !== i && q.cfg.tf === cfg.tf && q.data.length) { try { q.chart.timeScale().setVisibleRange(r); } catch (e) {} }
+        const n = pane.data.length;
+        for (const [j, q] of P.entries()) if (j !== i && q.cfg.tf === cfg.tf && q.data.length) {
+          const k = q.data.length - n;
+          try { q.chart.timeScale().setVisibleLogicalRange({ from: r.from + k, to: r.to + k }); } catch (e) {}
+        }
       });
     });
     fillPane(i);
@@ -1321,6 +1336,7 @@ function fillPane(i) {
     if (c.liveBar.time === data[data.length - 1].time) data[data.length - 1] = { ...c.liveBar }; else data.push({ ...c.liveBar });
   } else c.liveBar = null;
   c.data = data;
+  { const sec = TF_SEC[tf] || 3600, t = data.length ? data[data.length - 1].time : 0; c.off = ((t % sec) + sec) % sec; }   // bucket start (broker-midnight D1 / H4)
   c.candles.setData(data);
   c.ema.setData(tf === "H1" ? emaOf(data, 96) : []);          // the strategy's trend line is defined on 1h bars
   c.rsi.setData(rsiOf(data));
@@ -1341,7 +1357,7 @@ function fillPane(i) {
   {
     for (const pl of c.lines) c.candles.removePriceLine(pl); c.lines = [];
     const step = TF_SEC[tf] || 3600;
-    const bucket = (iso) => Math.floor(Date.parse(iso) / 1000 / step) * step;
+    const bucket = (iso) => Math.floor((Date.parse(iso) / 1000 - c.off) / step) * step + c.off;
     const marks = [];
     for (const t of (S.trades || []).filter((t) => t.symbol === s)) {
       const buy = t.direction === "BUY";
@@ -1769,7 +1785,7 @@ async function loadTick() {
       if (q) { const old = parseFloat(c.cpx.textContent.replace(/,/g, "")); c.cpx.textContent = fmt(q.bid, dec(q.bid)); flash(c.cpx, old, q.bid); }
       if (!q || !q.time_utc || !c.lastBar) continue;
       const t = Date.parse(q.time_utc) / 1000; if (t <= c.lastTick) continue; c.lastTick = t;
-      const bucket = Math.floor(t / step) * step, p = q.bid;
+      const bucket = Math.floor((t - (c.off || 0)) / step) * step + (c.off || 0), p = q.bid;
       if (bucket === c.lastBar.time) {
         c.lastBar.high = Math.max(c.lastBar.high, p); c.lastBar.low = Math.min(c.lastBar.low, p); c.lastBar.close = p;
         c.data[c.data.length - 1] = { ...c.lastBar };

@@ -233,6 +233,8 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                     done = df[df["time"] < pd.Timestamp(now).floor("1h")].reset_index(drop=True)
                     tick = gw.get_tick(s) or {}
                     m1 = gw.get_rates(s, "M1", 240)
+                    # chart history per timeframe (resampling 240 M1 bars left 5m / 15m with 17-50 candles)
+                    hist = {tf: gw.get_rates(s, tf, bars) for tf in ("M5", "M15", "H4", "D1")}
                     info = mt5.symbol_info(s)
                     regime = None
                     if s in regime_filter.parse_symbols(os.getenv("MULTI_REGIME_SYMBOLS", "")):
@@ -244,6 +246,8 @@ def market(symbols: list[str], bars: int = 300, ttl: float = 30.0) -> dict:
                         "candles_m1": [] if m1 is None or m1.empty else [
                             {"time": int(pd.Timestamp(r.time).timestamp()), "open": r.open, "high": r.high,
                              "low": r.low, "close": r.close} for r in m1.itertuples()],
+                        "history": {tf: [[int(pd.Timestamp(r.time).timestamp()), r.open, r.high, r.low, r.close] for r in h.itertuples()]
+                                    for tf, h in hist.items() if h is not None and not h.empty},
                         "readiness": signal_readiness(done) if len(done) > 120 else {"error": "not enough bars"},
                         "forming": forming_preview(df, now) if len(done) > 120 else None,
                         "bid": tick.get("bid"), "ask": tick.get("ask"), "spread": tick.get("spread"),
