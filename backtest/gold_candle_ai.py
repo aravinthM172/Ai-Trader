@@ -88,6 +88,9 @@ def main() -> int:
 
     d = pd.read_csv(ROOT / "data" / "xauusd_m5_5y.csv")
     d["time"] = pd.to_datetime(d["time"], utc=True)
+    from backtest.gold_cheatsheet_test import server_to_utc
+    d["time"] = server_to_utc(d["time"])          # broker server time -> UTC
+    d = d.dropna(subset=["time"])
     d["spr"] = d["spread"] / 100.0
     d = d.sort_values("time").reset_index(drop=True)
     X = features(d).shift(1)                                  # features known at the open of the predicted bar

@@ -30,6 +30,9 @@ SLIP = 0.25
 def load(path: Path) -> pd.DataFrame:
     d = pd.read_csv(path)
     d["time"] = pd.to_datetime(d["time"], utc=True)
+    from backtest.gold_cheatsheet_test import server_to_utc
+    d["time"] = server_to_utc(d["time"])          # broker server time -> UTC
+    d = d.dropna(subset=["time"])
     d["spr"] = d["spread"] / 100.0 if "spread" in d else 0.15        # points -> $ (2-digit gold)
     return d.sort_values("time").reset_index(drop=True)
 

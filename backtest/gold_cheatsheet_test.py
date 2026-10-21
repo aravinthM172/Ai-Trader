@@ -46,10 +46,20 @@ TARGETS = (1.5, 2.0, 3.0)
 HOLD = 32
 
 
+def server_to_utc(t: pd.Series) -> pd.Series:
+    """MT5 broker server time (FundedNext, Valetax) = New York time + 7 h (UTC+3 summer / UTC+2 winter) -> real UTC.
+    Checked 2026-10-21 against Dukascopy UTC: median close difference $9.65 before, $0.27 after."""
+    naive = t.dt.tz_localize(None) - pd.Timedelta(hours=7)
+    return naive.dt.tz_localize("America/New_York", ambiguous="NaT", nonexistent="shift_forward").dt.tz_convert("UTC")
+
+
 def load_m5(path: Path) -> pd.DataFrame:
+    """Broker MT5 history (FundedNext / Valetax M1 or M5 exports); timestamps converted from server time to UTC."""
     d = pd.read_csv(path)
     d["time"] = pd.to_datetime(d["time"], unit="s", utc=True) if pd.api.types.is_numeric_dtype(d["time"]) \
         else pd.to_datetime(d["time"], utc=True)
+    d["time"] = server_to_utc(d["time"])
+    d = d.dropna(subset=["time"])
     d["spr"] = d["spread"] / 100.0
     return d.sort_values("time").drop_duplicates("time").reset_index(drop=True)
 
