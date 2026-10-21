@@ -132,6 +132,7 @@ def signals(p: pd.DataFrame, method: str):
     hr = p.time.dt.hour.to_numpy()
     sess = (hr >= 7) & (hr < 20)
     out, flat = [], None
+    lo5, hi5 = r7.lo(l, 5), r7.hi(h, 5)                       # computed once (was per signal)
     if method in ("ny_orb15", "ny_orb30", "ldn_orb30"):
         tz, st, mn, en = {"ny_orb15": ("America/New_York", 570, 15, 930), "ny_orb30": ("America/New_York", 570, 30, 930),
                           "ldn_orb30": ("Europe/London", 480, 30, 720)}[method]
@@ -143,16 +144,16 @@ def signals(p: pd.DataFrame, method: str):
     elif method == "ema9_21_rsi":
         e9, e21, r = r7.ema(c, 9), r7.ema(c, 21), r7.rsi(c, 14)
         up, dn = r7.cross_up(e9, e21) & (r > 50) & sess, r7.cross_up(e21, e9) & (r < 50) & sess
-        out = [(i, 1, r7.lo(l, 5)[i] - 0.1 * A[i], None) for i in np.flatnonzero(up)] + \
-              [(i, -1, r7.hi(h, 5)[i] + 0.1 * A[i], None) for i in np.flatnonzero(dn)]
+        out = [(i, 1, lo5[i] - 0.1 * A[i], None) for i in np.flatnonzero(up)] + \
+              [(i, -1, hi5[i] + 0.1 * A[i], None) for i in np.flatnonzero(dn)]
     elif method == "ema4_stack":
         e9, e21, e34, e50 = (r7.ema(c, n) for n in (9, 21, 34, 50))
         tu = pd.Series(l <= e21).rolling(3).max().to_numpy() > 0
         td = pd.Series(h >= e21).rolling(3).max().to_numpy() > 0
         up = (e9 > e21) & (e21 > e34) & (e34 > e50) & tu & (c > e9) & (r7.prev(c) <= r7.prev(e9)) & sess
         dn = (e9 < e21) & (e21 < e34) & (e34 < e50) & td & (c < e9) & (r7.prev(c) >= r7.prev(e9)) & sess
-        out = [(i, 1, r7.lo(l, 5)[i] - 0.1 * A[i], None) for i in np.flatnonzero(up)] + \
-              [(i, -1, r7.hi(h, 5)[i] + 0.1 * A[i], None) for i in np.flatnonzero(dn)]
+        out = [(i, 1, lo5[i] - 0.1 * A[i], None) for i in np.flatnonzero(up)] + \
+              [(i, -1, hi5[i] + 0.1 * A[i], None) for i in np.flatnonzero(dn)]
     elif method in ("vwap_pullback", "vwap_fade"):
         vw, sd = vwap(p)
         if method == "vwap_pullback":
